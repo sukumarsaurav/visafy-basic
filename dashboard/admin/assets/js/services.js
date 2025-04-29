@@ -1,47 +1,86 @@
-$(document).ready(function() {
-    // Initialize DataTable
-    const servicesTable = $('#services-table').DataTable({
-        ajax: {
-            url: 'ajax/get_services.php',
-            dataSrc: ''
-        },
-        columns: [
-            { data: 'country_name' },
-            { data: 'visa_type_name' },
-            { data: 'service_type_name' },
-            { data: 'consultation_mode_name' },
-            { 
-                data: 'price',
-                render: function(data) {
-                    return `$${parseFloat(data).toFixed(2)}`;
-                }
+// Modal handling script
+document.addEventListener('DOMContentLoaded', function() {
+    // Get modal and button references
+    const serviceModal = document.getElementById('service-modal');
+    const addServiceBtn = document.getElementById('add-service-btn');
+    const closeButtons = document.querySelectorAll('.btn-close, [data-bs-dismiss="modal"]');
+    const saveServiceBtn = document.getElementById('save-service-btn');
+    
+    // Initialize DataTable if the function exists
+    if ($.fn.DataTable) {
+        const servicesTable = $('#services-table').DataTable({
+            ajax: {
+                url: 'ajax/get_services.php',
+                dataSrc: ''
             },
-            {
-                data: 'is_active',
-                render: function(data) {
-                    return data == 1 ? 
-                        '<span class="badge bg-success">Active</span>' : 
-                        '<span class="badge bg-danger">Inactive</span>';
+            columns: [
+                { data: 'country_name' },
+                { data: 'visa_type_name' },
+                { data: 'service_type_name' },
+                { data: 'consultation_mode_name' },
+                { 
+                    data: 'price',
+                    render: function(data) {
+                        return `$${parseFloat(data).toFixed(2)}`;
+                    }
+                },
+                {
+                    data: 'is_active',
+                    render: function(data) {
+                        return data == 1 ? 
+                            '<span class="badge bg-success">Active</span>' : 
+                            '<span class="badge bg-danger">Inactive</span>';
+                    }
+                },
+                {
+                    data: null,
+                    render: function(data) {
+                        return `
+                            <button class="btn btn-sm btn-primary edit-btn" data-id="${data.id}">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn btn-sm btn-danger delete-btn" data-id="${data.id}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        `;
+                    }
                 }
-            },
-            {
-                data: null,
-                render: function(data) {
-                    return `
-                        <button class="btn btn-sm btn-primary edit-btn" data-id="${data.id}">
-                            <i class="fas fa-edit"></i>
-                        </button>
-                        <button class="btn btn-sm btn-danger delete-btn" data-id="${data.id}">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    `;
-                }
-            }
-        ],
-        order: [[0, 'asc']],
-        responsive: true
+            ],
+            order: [[0, 'asc']],
+            responsive: true
+        });
+    } else {
+        console.error('DataTable function is not available. Make sure jQuery and DataTables are properly loaded.');
+    }
+    
+    // Show modal when clicking "Add New Service" button
+    addServiceBtn.addEventListener('click', function() {
+        // Reset the form
+        document.getElementById('service-form').reset();
+        document.getElementById('config-id').value = '';
+        document.getElementById('visa-type').disabled = true;
+        
+        // Display the modal
+        serviceModal.style.display = 'block';
+        serviceModal.classList.add('show');
     });
-
+    
+    // Close modal when clicking close buttons
+    closeButtons.forEach(function(button) {
+        button.addEventListener('click', function() {
+            serviceModal.style.display = 'none';
+            serviceModal.classList.remove('show');
+        });
+    });
+    
+    // Close modal when clicking outside of it
+    window.addEventListener('click', function(event) {
+        if (event.target === serviceModal) {
+            serviceModal.style.display = 'none';
+            serviceModal.classList.remove('show');
+        }
+    });
+    
     // Handle country change
     $('#country').change(function() {
         const countryId = $(this).val();
@@ -62,15 +101,7 @@ $(document).ready(function() {
                 });
         }
     });
-
-    // Show add service modal
-    $('#add-service-btn').click(function() {
-        $('#config-id').val('');
-        $('#service-form')[0].reset();
-        $('#visa-type').prop('disabled', true);
-        $('#service-modal').modal('show');
-    });
-
+    
     // Handle edit button click
     $(document).on('click', '.edit-btn', function() {
         const id = $(this).data('id');
@@ -90,33 +121,40 @@ $(document).ready(function() {
                 $('#price').val(data.price);
                 $('#is-active').prop('checked', data.is_active == 1);
                 
-                $('#service-modal').modal('show');
+                // Show the modal
+                serviceModal.style.display = 'block';
+                serviceModal.classList.add('show');
             });
     });
-
+    
     // Handle save button click
-    $('#save-service-btn').click(function() {
-        const form = $('#service-form');
+    saveServiceBtn.addEventListener('click', function() {
+        const form = document.getElementById('service-form');
         
-        if (!form[0].checkValidity()) {
-            form[0].reportValidity();
+        if (!form.checkValidity()) {
+            form.reportValidity();
             return;
         }
         
         const data = {
-            id: $('#config-id').val(),
-            visa_type_id: $('#visa-type').val(),
-            service_type_id: $('#service-type').val(),
-            consultation_mode_id: $('#consultation-mode').val(),
-            price: $('#price').val(),
-            is_active: $('#is-active').is(':checked') ? 1 : 0
+            id: document.getElementById('config-id').value,
+            visa_type_id: document.getElementById('visa-type').value,
+            service_type_id: document.getElementById('service-type').value,
+            consultation_mode_id: document.getElementById('consultation-mode').value,
+            price: document.getElementById('price').value,
+            is_active: document.getElementById('is-active').checked ? 1 : 0
         };
         
         $.post('ajax/save_service.php', data)
             .done(function(response) {
                 if (response.success) {
-                    $('#service-modal').modal('hide');
-                    servicesTable.ajax.reload();
+                    serviceModal.style.display = 'none';
+                    serviceModal.classList.remove('show');
+                    
+                    if ($.fn.DataTable && $.fn.DataTable.isDataTable('#services-table')) {
+                        $('#services-table').DataTable().ajax.reload();
+                    }
+                    
                     toastr.success('Service configuration saved successfully');
                 } else {
                     toastr.error(response.message || 'Failed to save service configuration');
@@ -126,7 +164,7 @@ $(document).ready(function() {
                 toastr.error('An error occurred while saving');
             });
     });
-
+    
     // Handle delete button click
     $(document).on('click', '.delete-btn', function() {
         const id = $(this).data('id');
@@ -135,7 +173,9 @@ $(document).ready(function() {
             $.post('ajax/delete_service.php', { id: id })
                 .done(function(response) {
                     if (response.success) {
-                        servicesTable.ajax.reload();
+                        if ($.fn.DataTable && $.fn.DataTable.isDataTable('#services-table')) {
+                            $('#services-table').DataTable().ajax.reload();
+                        }
                         toastr.success('Service configuration deleted successfully');
                     } else {
                         toastr.error(response.message || 'Failed to delete service configuration');

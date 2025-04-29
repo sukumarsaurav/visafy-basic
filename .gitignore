@@ -1,0 +1,9 @@
+composer.phar
+/vendor/
+/config/
+/uploads/
+/assets/images/
+/assets/css/
+/assets/js/
+/assets/fonts/
+/assets/videos/

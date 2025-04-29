@@ -86,6 +86,7 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
     <title><?php echo isset($page_title) ? $page_title : 'Admin Dashboard'; ?> - Visafy</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
     <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="assets/css/visa.css">
     <?php if (isset($page_specific_css)): ?>
@@ -202,8 +203,11 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
                     <i class="fas fa-calendar-alt"></i>
                     <span class="nav-item-text">Bookings-Schedule</span>
                 </a>
-              
                 <div class="sidebar-divider"></div>
+                <a href="leads.php" class="nav-item <?php echo $current_page == 'leads' ? 'active' : ''; ?>">
+                    <i class="fas fa-users"></i>
+                    <span class="nav-item-text">Leads</span>
+                </a>
                 <a href="clients.php" class="nav-item <?php echo $current_page == 'clients' ? 'active' : ''; ?>">
                     <i class="fas fa-users"></i>
                     <span class="nav-item-text">Clients</span>

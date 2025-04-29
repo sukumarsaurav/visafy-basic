@@ -223,7 +223,7 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
                 
                 <div class="sidebar-divider"></div>
                 <div class="sidebar-section-title">Team Management</div>
-                <a href="members.php" class="nav-item <?php echo $current_page == 'members' ? 'active' : ''; ?>">
+                <a href="team.php" class="nav-item <?php echo $current_page == 'members' ? 'active' : ''; ?>">
                     <i class="fas fa-user-friends"></i>
                     <span class="nav-item-text">Team Members</span>
                 </a>

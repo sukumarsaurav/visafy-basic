@@ -73,124 +73,204 @@ require_once 'includes/header.php';
 </div>
 
 <!-- New Conversation Modal -->
-<div class="modal fade" id="new-conversation-modal" tabindex="-1" aria-labelledby="newConversationModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="newConversationModalLabel">Start New Conversation</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<div class="modal" id="new-conversation-modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Start New Conversation</h2>
+        <form id="new-conversation-form">
+            <div class="form-group">
+                <label for="conversation-type">Conversation Type</label>
+                <select id="conversation-type" name="conversation_type">
+                    <option value="direct">Direct Message</option>
+                    <option value="group">Group Chat</option>
+                </select>
             </div>
-            <div class="modal-body">
-                <form id="new-conversation-form">
-                    <div class="mb-3">
-                        <label for="conversation-type" class="form-label">Conversation Type</label>
-                        <select class="form-select" id="conversation-type" name="conversation_type">
-                            <option value="direct">Direct Message</option>
-                            <option value="group">Group Chat</option>
-                        </select>
-                    </div>
-                    
-                    <div class="mb-3" id="group-title-container" style="display: none;">
-                        <label for="group-title" class="form-label">Group Title</label>
-                        <input type="text" class="form-control" id="group-title" name="group_title">
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="participants" class="form-label">Select Participants</label>
-                        <select class="form-select" id="participants" name="participants[]" multiple>
-                            <!-- Options will be loaded dynamically -->
-                        </select>
-                        <div class="form-text">Search and select users to include in the conversation</div>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="initial-message" class="form-label">Initial Message (Optional)</label>
-                        <textarea class="form-control" id="initial-message" name="initial_message" rows="3"></textarea>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label for="related-to-type" class="form-label">Related To (Optional)</label>
-                        <select class="form-select" id="related-to-type" name="related_to_type">
-                            <option value="">None</option>
-                            <option value="application">Visa Application</option>
-                            <option value="booking">Booking</option>
-                            <option value="task">Task</option>
-                            <option value="general">General</option>
-                        </select>
-                    </div>
-                    
-                    <div class="mb-3" id="related-id-container" style="display: none;">
-                        <label for="related-id" class="form-label">Select Item</label>
-                        <select class="form-select" id="related-id" name="related_id">
-                            <option value="">-- Select --</option>
-                        </select>
-                    </div>
-                </form>
+            
+            <div class="form-group" id="group-title-container" style="display: none;">
+                <label for="group-title">Group Title</label>
+                <input type="text" id="group-title" name="group_title" placeholder="Enter group title">
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="create-conversation-btn">Create Conversation</button>
+            
+            <div class="form-group">
+                <label for="participants">Select Participants</label>
+                <select id="participants" name="participants[]" multiple>
+                    <!-- Options will be loaded dynamically -->
+                </select>
+                <small>Search and select users to include in the conversation</small>
             </div>
-        </div>
+            
+            <div class="form-group">
+                <label for="initial-message">Initial Message (Optional)</label>
+                <textarea id="initial-message" name="initial_message" rows="3" placeholder="Type your first message..."></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="related-to-type">Related To (Optional)</label>
+                <select id="related-to-type" name="related_to_type">
+                    <option value="">None</option>
+                    <option value="application">Visa Application</option>
+                    <option value="booking">Booking</option>
+                    <option value="task">Task</option>
+                    <option value="general">General</option>
+                </select>
+            </div>
+            
+            <div class="form-group" id="related-id-container" style="display: none;">
+                <label for="related-id">Select Item</label>
+                <select id="related-id" name="related_id">
+                    <option value="">-- Select --</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <button type="submit" class="btn">Create Conversation</button>
+            </div>
+        </form>
     </div>
 </div>
 
 <!-- Add Participant Modal -->
-<div class="modal fade" id="add-participant-modal" tabindex="-1" aria-labelledby="addParticipantModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="addParticipantModalLabel">Add Participants</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<div class="modal" id="add-participant-modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Add Participants</h2>
+        <form id="add-participant-form">
+            <input type="hidden" id="add-to-conversation-id" name="conversation_id">
+            <div class="form-group">
+                <label for="new-participants">Select Users</label>
+                <select id="new-participants" name="new_participants[]" multiple>
+                    <!-- Options will be loaded dynamically -->
+                </select>
             </div>
-            <div class="modal-body">
-                <form id="add-participant-form">
-                    <input type="hidden" id="add-to-conversation-id" name="conversation_id">
-                    <div class="mb-3">
-                        <label for="new-participants" class="form-label">Select Users</label>
-                        <select class="form-select" id="new-participants" name="new_participants[]" multiple>
-                            <!-- Options will be loaded dynamically -->
-                        </select>
-                    </div>
-                </form>
+            
+            <div class="form-group">
+                <button type="submit" class="btn">Add to Conversation</button>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="add-participants-btn">Add to Conversation</button>
-            </div>
-        </div>
+        </form>
     </div>
 </div>
 
 <!-- Conversation Info Modal -->
-<div class="modal fade" id="conversation-info-modal" tabindex="-1" aria-labelledby="conversationInfoModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="conversationInfoModalLabel">Conversation Information</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <h6>Participants</h6>
-                <ul class="participant-list" id="info-participant-list">
-                    <!-- Will be filled dynamically -->
-                </ul>
-                
-                <div id="related-info" class="mt-4">
-                    <h6>Related To</h6>
-                    <p id="related-info-text">Not related to any item</p>
-                </div>
-                
-                <div class="mt-4">
-                    <h6>Created</h6>
-                    <p id="conversation-created-at"></p>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-            </div>
+<div class="modal" id="conversation-info-modal">
+    <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Conversation Information</h2>
+        <div class="info-section">
+            <h3>Participants</h3>
+            <ul class="participant-list" id="info-participant-list">
+                <!-- Will be filled dynamically -->
+            </ul>
+        </div>
+        
+        <div class="info-section" id="related-info">
+            <h3>Related To</h3>
+            <p id="related-info-text">Not related to any item</p>
+        </div>
+        
+        <div class="info-section">
+            <h3>Created</h3>
+            <p id="conversation-created-at"></p>
+        </div>
+        
+        <div class="form-group">
+            <button type="button" class="btn close-modal-btn">Close</button>
         </div>
     </div>
 </div>
 
-<?php require_once 'includes/footer.php'; ?> 
+<!-- JavaScript for Modal Functionality -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Modal functionality
+    const modals = document.querySelectorAll('.modal');
+    const modalTriggers = {
+        'new-conversation-btn': 'new-conversation-modal',
+        'add-participant-btn': 'add-participant-modal',
+        'view-info-btn': 'conversation-info-modal'
+    };
+    
+    // Open modals
+    Object.keys(modalTriggers).forEach(triggerId => {
+        const trigger = document.getElementById(triggerId);
+        const modalId = modalTriggers[triggerId];
+        
+        if (trigger) {
+            trigger.addEventListener('click', function() {
+                document.getElementById(modalId).style.display = 'block';
+            });
+        }
+    });
+    
+    // Close modals
+    const closeButtons = document.querySelectorAll('.modal .close, .close-modal-btn');
+    closeButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const modal = this.closest('.modal');
+            modal.style.display = 'none';
+        });
+    });
+    
+    // Close modal when clicking outside
+    window.addEventListener('click', function(event) {
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    });
+    
+    // Toggle group title field based on conversation type
+    const conversationType = document.getElementById('conversation-type');
+    const groupTitleContainer = document.getElementById('group-title-container');
+    
+    if (conversationType && groupTitleContainer) {
+        conversationType.addEventListener('change', function() {
+            if (this.value === 'group') {
+                groupTitleContainer.style.display = 'block';
+            } else {
+                groupTitleContainer.style.display = 'none';
+            }
+        });
+    }
+    
+    // Toggle related item selector based on related type
+    const relatedToType = document.getElementById('related-to-type');
+    const relatedIdContainer = document.getElementById('related-id-container');
+    
+    if (relatedToType && relatedIdContainer) {
+        relatedToType.addEventListener('change', function() {
+            if (this.value) {
+                relatedIdContainer.style.display = 'block';
+                // Here you would load the related items based on the selected type
+                loadRelatedItems(this.value);
+            } else {
+                relatedIdContainer.style.display = 'none';
+            }
+        });
+    }
+    
+    function loadRelatedItems(type) {
+        const relatedIdSelect = document.getElementById('related-id');
+        relatedIdSelect.innerHTML = '<option value="">-- Select --</option>';
+        
+        // This would be replaced with an actual AJAX call to get items
+        fetch(`ajax/get_related_items.php?type=${type}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    data.items.forEach(item => {
+                        const option = document.createElement('option');
+                        option.value = item.id;
+                        option.textContent = item.name;
+                        relatedIdSelect.appendChild(option);
+                    });
+                }
+            })
+            .catch(error => {
+                console.error('Error loading related items:', error);
+            });
+    }
+});
+</script>
+
+<?php require_once 'includes/footer.php'; ?>

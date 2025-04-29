@@ -1,1184 +1,522 @@
 <?php
-// Set page variables
-$page_title = "Manage Bookings";
-$page_header = "Booking Management";
-
-// Include header (handles session and authentication)
+$page_title = "Bookings Management";
+$page_specific_css = "assets/css/bookings.css";
 require_once 'includes/header.php';
 
-// Check if user is admin
-if (!isset($_SESSION['user_type']) || ($_SESSION['user_type'] !== 'admin' && $_SESSION['user_type'] !== 'member')) {
-    echo "<div class='alert alert-danger'>Access denied. Only admin users can access this page.</div>";
-    require_once 'includes/footer.php';
-    exit;
-}
-
-// Make sure user_id is set
-if (!isset($_SESSION['user_id'])) {
-    echo "<div class='alert alert-danger'>Session error. Please log in again.</div>";
-    require_once 'includes/footer.php';
-    exit;
-}
-
-$user_id = $_SESSION['user_id'];
-$user_type = $_SESSION['user_type'];
-
-// Get team members if admin
-$team_members = [];
-$max_concurrent_bookings = 1;
-
-if ($user_type === 'admin') {
-    // Get team members for this admin
-    $team_sql = "SELECT id, user_id, role, custom_role_name FROM team_members WHERE deleted_at IS NULL";
-    $stmt = $conn->prepare($team_sql);
-    $stmt->execute();
-    $team_members = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+// Handle booking assignment
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_booking'])) {
+    $booking_id = $_POST['booking_id'];
+    $team_member_id = $_POST['team_member_id'];
+    $booking_date = $_POST['booking_date'];
+    $start_time = $_POST['start_time'];
+    $end_time = $_POST['end_time'];
+    $admin_notes = $_POST['admin_notes'];
     
-    // Create admin_booking_settings table if it doesn't exist
-    $create_table_sql = "CREATE TABLE IF NOT EXISTS `admin_booking_settings` (
-        `id` int(11) NOT NULL AUTO_INCREMENT,
-        `user_id` int(11) NOT NULL,
-        `max_concurrent_bookings` int(11) NOT NULL DEFAULT 1,
-        `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-        `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `user_id` (`user_id`),
-        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;";
-    
-    $conn->query($create_table_sql);
-    
-    // Get booking capacity setting
-    $capacity_sql = "SELECT COALESCE(max_concurrent_bookings, 1) as max_bookings FROM admin_booking_settings WHERE user_id = ?";
-    $stmt = $conn->prepare($capacity_sql);
-    $stmt->bind_param("i", $user_id);
-    $stmt->execute();
-    $capacity_result = $stmt->get_result();
-    if ($capacity_result->num_rows > 0) {
-        $capacity_data = $capacity_result->fetch_assoc();
-        $max_concurrent_bookings = $capacity_data['max_bookings'];
-    }
-}
-
-// Handle form submissions (availability, capacity, timeslot settings)
-$success_message = "";
-$error_message = "";
-
-// Rest of the code remains the same...
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Process different form actions
-    if (isset($_POST['action'])) {
-        switch ($_POST['action']) {
-            case 'update_capacity':
-                if ($user_type === 'admin' && isset($_POST['max_concurrent_bookings']) && is_numeric($_POST['max_concurrent_bookings'])) {
-                    $max_bookings = max(1, intval($_POST['max_concurrent_bookings']));
-                    
-                    // Check if capacity setting exists
-                    $check_stmt = $conn->prepare("SELECT id FROM admin_booking_settings WHERE user_id = ?");
-                    $check_stmt->bind_param("i", $user_id);
-                    $check_stmt->execute();
-                    
-                    if ($check_stmt->get_result()->num_rows > 0) {
-                        // Update existing
-                        $update_stmt = $conn->prepare("UPDATE admin_booking_settings SET max_concurrent_bookings = ? WHERE user_id = ?");
-                        $update_stmt->bind_param("ii", $max_bookings, $user_id);
-                        if ($update_stmt->execute()) {
-                            $success_message = "Booking capacity updated successfully!";
-                            $max_concurrent_bookings = $max_bookings;
-                        } else {
-                            $error_message = "Failed to update booking capacity: " . $conn->error;
-                        }
-                    } else {
-                        // Insert new
-                        $insert_stmt = $conn->prepare("INSERT INTO admin_booking_settings (user_id, max_concurrent_bookings) VALUES (?, ?)");
-                        $insert_stmt->bind_param("ii", $user_id, $max_bookings);
-                        if ($insert_stmt->execute()) {
-                            $success_message = "Booking capacity set successfully!";
-                            $max_concurrent_bookings = $max_bookings;
-                        } else {
-                            $error_message = "Failed to set booking capacity: " . $conn->error;
-                        }
-                    }
-                }
-                break;
+    // Validate inputs
+    if (empty($team_member_id) || empty($booking_date) || empty($start_time) || empty($end_time)) {
+        $error_message = "All fields are required";
+    } else {
+        // Check if team member is available at the selected time
+        $check_query = "SELECT COUNT(*) as count FROM bookings 
+                      WHERE team_member_id = ? 
+                      AND booking_date = ? 
+                      AND ((start_time <= ? AND end_time > ?) OR (start_time < ? AND end_time >= ?) OR (start_time >= ? AND end_time <= ?))
+                      AND status NOT IN ('cancelled', 'no_show')
+                      AND id != ?";
+        
+        $check_stmt = $conn->prepare($check_query);
+        $check_stmt->bind_param('isssssssi', $team_member_id, $booking_date, $start_time, $start_time, $end_time, $end_time, $start_time, $end_time, $booking_id);
+        $check_stmt->execute();
+        $check_result = $check_stmt->get_result();
+        $conflicting_bookings = $check_result->fetch_assoc()['count'];
+        
+        if ($conflicting_bookings > 0) {
+            $error_message = "The selected team member is not available at this time";
+        } else {
+            // Update booking
+            $prev_team_member_query = "SELECT team_member_id FROM bookings WHERE id = ?";
+            $prev_stmt = $conn->prepare($prev_team_member_query);
+            $prev_stmt->bind_param('i', $booking_id);
+            $prev_stmt->execute();
+            $prev_result = $prev_stmt->get_result();
+            $prev_team_member = $prev_result->fetch_assoc()['team_member_id'];
+            
+            $update_query = "UPDATE bookings SET 
+                          team_member_id = ?,
+                          booking_date = ?,
+                          start_time = ?,
+                          end_time = ?,
+                          admin_notes = ?,
+                          status = 'assigned'
+                          WHERE id = ?";
+            
+            $update_stmt = $conn->prepare($update_query);
+            $update_stmt->bind_param('issssi', $team_member_id, $booking_date, $start_time, $end_time, $admin_notes, $booking_id);
+            
+            if ($update_stmt->execute()) {
+                // Record assignment history
+                $history_query = "INSERT INTO booking_assignment_history 
+                              (booking_id, admin_id, team_member_id, previous_team_member_id, notes) 
+                              VALUES (?, ?, ?, ?, ?)";
                 
-            case 'add_timeslot':
-                if (isset($_POST['day_of_week'], $_POST['start_time'], $_POST['end_time'])) {
-                    $day_of_week = intval($_POST['day_of_week']);
-                    $start_time = $_POST['start_time'];
-                    $end_time = $_POST['end_time'];
-                    $is_available = isset($_POST['is_available']) ? 1 : 0;
-                    $slot_duration = isset($_POST['slot_duration']) ? intval($_POST['slot_duration']) : 60;
-                    $buffer_time = isset($_POST['buffer_time']) ? intval($_POST['buffer_time']) : 0;
-                    
-                    // Validate time format and order
-                    if ($start_time >= $end_time) {
-                        $error_message = "End time must be after start time.";
-                        break;
-                    }
-                    
-                    // Check for overlapping timeslots
-                    $check_stmt = $conn->prepare("SELECT id FROM timeslot_configurations 
-                                                 WHERE user_id = ? AND day_of_week = ? AND 
-                                                 ((start_time <= ? AND end_time > ?) OR 
-                                                 (start_time < ? AND end_time >= ?) OR 
-                                                 (start_time >= ? AND end_time <= ?))");
-                    $check_stmt->bind_param("iissssss", $user_id, $day_of_week, $end_time, $start_time, $end_time, $start_time, $start_time, $end_time);
-                    $check_stmt->execute();
-                    if ($check_stmt->get_result()->num_rows > 0) {
-                        $error_message = "This timeslot overlaps with an existing timeslot for this day.";
-                        break;
-                    }
-                    
-                    // Insert new timeslot
-                    $stmt = $conn->prepare("INSERT INTO timeslot_configurations 
-                                          (user_id, day_of_week, start_time, end_time, is_available, slot_duration, buffer_time) 
-                                          VALUES (?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->bind_param("iissiii", $user_id, $day_of_week, $start_time, $end_time, $is_available, $slot_duration, $buffer_time);
-                    
-                    if ($stmt->execute()) {
-                        $success_message = "Timeslot added successfully!";
-                    } else {
-                        $error_message = "Failed to add timeslot: " . $conn->error;
-                    }
-                }
-                break;
+                $history_stmt = $conn->prepare($history_query);
+                $admin_id = $_SESSION['user_id'];
+                $history_stmt->bind_param('iiiis', $booking_id, $admin_id, $team_member_id, $prev_team_member, $admin_notes);
+                $history_stmt->execute();
                 
-            case 'delete_timeslot':
-                if (isset($_POST['timeslot_id']) && is_numeric($_POST['timeslot_id'])) {
-                    $timeslot_id = intval($_POST['timeslot_id']);
-                    
-                    // Verify timeslot belongs to this user
-                    $check_stmt = $conn->prepare("SELECT id FROM timeslot_configurations WHERE id = ? AND user_id = ?");
-                    $check_stmt->bind_param("ii", $timeslot_id, $user_id);
-                    $check_stmt->execute();
-                    if ($check_stmt->get_result()->num_rows === 0) {
-                        $error_message = "Timeslot not found or you don't have permission to delete it.";
-                        break;
-                    }
-                    
-                    // Delete the timeslot
-                    $stmt = $conn->prepare("DELETE FROM timeslot_configurations WHERE id = ?");
-                    $stmt->bind_param("i", $timeslot_id);
-                    if ($stmt->execute()) {
-                        $success_message = "Timeslot deleted successfully!";
-                    } else {
-                        $error_message = "Failed to delete timeslot: " . $conn->error;
-                    }
-                }
-                break;
+                // Log activity
+                $activity_type = $prev_team_member ? 'reassigned' : 'assigned';
+                $activity_query = "INSERT INTO booking_activity_logs 
+                               (booking_id, user_id, user_type, activity_type, description) 
+                               VALUES (?, ?, 'admin', ?, ?)";
                 
-            case 'add_date_override':
-                if (isset($_POST['override_date'], $_POST['is_date_available'])) {
-                    $override_date = $_POST['override_date'];
-                    $is_available = intval($_POST['is_date_available']);
-                    $reason = trim($_POST['reason'] ?? '');
-                    
-                    // Validate date format
-                    $date_obj = DateTime::createFromFormat('Y-m-d', $override_date);
-                    if (!$date_obj || $date_obj->format('Y-m-d') !== $override_date) {
-                        $error_message = "Invalid date format.";
-                        break;
-                    }
-                    
-                    // Check if override exists
-                    $check_stmt = $conn->prepare("SELECT id FROM availability_overrides WHERE user_id = ? AND date = ?");
-                    $check_stmt->bind_param("is", $user_id, $override_date);
-                    $check_stmt->execute();
-                    
-                    if ($check_stmt->get_result()->num_rows > 0) {
-                        // Update existing
-                        $update_stmt = $conn->prepare("UPDATE availability_overrides SET is_available = ?, reason = ? WHERE user_id = ? AND date = ?");
-                        $update_stmt->bind_param("issi", $is_available, $reason, $user_id, $override_date);
-                        if ($update_stmt->execute()) {
-                            $success_message = "Date availability updated successfully!";
-                        } else {
-                            $error_message = "Failed to update date availability: " . $conn->error;
-                        }
-                    } else {
-                        // Insert new
-                        $insert_stmt = $conn->prepare("INSERT INTO availability_overrides (user_id, date, is_available, reason) VALUES (?, ?, ?, ?)");
-                        $insert_stmt->bind_param("isis", $user_id, $override_date, $is_available, $reason);
-                        if ($insert_stmt->execute()) {
-                            $success_message = "Date availability set successfully!";
-                        } else {
-                            $error_message = "Failed to set date availability: " . $conn->error;
-                        }
-                    }
-                }
-                break;
+                $description = "Booking " . ($prev_team_member ? "reassigned" : "assigned") . " to team member ID $team_member_id";
+                $activity_stmt = $conn->prepare($activity_query);
+                $activity_stmt->bind_param('iiss', $booking_id, $admin_id, $activity_type, $description);
+                $activity_stmt->execute();
                 
-            case 'update_booking_status':
-                if (isset($_POST['booking_id'], $_POST['status']) && is_numeric($_POST['booking_id'])) {
-                    $booking_id = intval($_POST['booking_id']);
-                    $status = $_POST['status'];
-                    $notes = trim($_POST['notes'] ?? '');
-                    
-                    // Verify booking belongs to this user
-                    $check_stmt = $conn->prepare("SELECT id FROM bookings WHERE id = ? AND admin_id = ?");
-                    $check_stmt->bind_param("ii", $booking_id, $user_id);
-                    $check_stmt->execute();
-                    if ($check_stmt->get_result()->num_rows === 0) {
-                        $error_message = "Booking not found or you don't have permission to update it.";
-                        break;
-                    }
-                    
-                    // Update booking status
-                    $stmt = $conn->prepare("UPDATE bookings SET status = ?, admin_notes = ? WHERE id = ?");
-                    $stmt->bind_param("ssi", $status, $notes, $booking_id);
-                    if ($stmt->execute()) {
-                        // If cancelled, update cancellation info
-                        if ($status === 'cancelled') {
-                            $cancel_stmt = $conn->prepare("UPDATE bookings SET cancellation_reason = ?, cancellation_date = NOW() WHERE id = ?");
-                            $cancel_stmt->bind_param("si", $notes, $booking_id);
-                            $cancel_stmt->execute();
-                        }
-                        $success_message = "Booking status updated successfully!";
-                    } else {
-                        $error_message = "Failed to update booking status: " . $conn->error;
-                    }
-                }
-                break;
+                $success_message = "Booking successfully assigned";
+                
+                // Get filter parameters for redirection
+                $status_filter = isset($_GET['status']) ? $_GET['status'] : 'all';
+                
+                // Redirect to prevent form resubmission
+                header("Location: bookings.php?status=$status_filter");
+                exit;
+            } else {
+                $error_message = "Error assigning booking: " . $conn->error;
+            }
         }
     }
 }
 
-// Get timeslot configurations
-$timeslots_sql = "SELECT * FROM timeslot_configurations WHERE user_id = ? ORDER BY day_of_week, start_time";
-$stmt = $conn->prepare($timeslots_sql);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$timeslots = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Get upcoming bookings
-$current_datetime = date('Y-m-d H:i:s');
-$bookings_sql = "
-    SELECT b.*, 
-           u.email as user_email,
-           s.name as service_name,
-           c.name as consultation_mode
-    FROM bookings b
-    JOIN users u ON b.user_id = u.id
-    JOIN services s ON b.service_id = s.id
-    JOIN consultation_modes c ON b.consultation_mode_id = c.id
-    WHERE b.admin_id = ? 
-    AND ((b.booking_date > CURDATE()) OR (b.booking_date = CURDATE() AND b.start_time >= CURTIME()))
-    AND b.status NOT IN ('cancelled', 'completed', 'no_show')
-    ORDER BY b.booking_date, b.start_time
-    LIMIT 20
-";
-$stmt = $conn->prepare($bookings_sql);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$upcoming_bookings = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Get date overrides for the next 30 days
-$date_overrides_sql = "
-    SELECT * FROM availability_overrides 
-    WHERE user_id = ? AND date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-    ORDER BY date
-";
-$stmt = $conn->prepare($date_overrides_sql);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$date_overrides = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Get past bookings
-$past_bookings_sql = "
-    SELECT b.*, 
-           u.email as user_email,
-           s.name as service_name,
-           c.name as consultation_mode
-    FROM bookings b
-    JOIN users u ON b.user_id = u.id
-    JOIN services s ON b.service_id = s.id
-    JOIN consultation_modes c ON b.consultation_mode_id = c.id
-    WHERE b.admin_id = ? 
-    AND ((b.booking_date < CURDATE()) OR (b.booking_date = CURDATE() AND b.start_time < CURTIME()) OR b.status IN ('cancelled', 'completed', 'no_show'))
-    ORDER BY b.booking_date DESC, b.start_time DESC
-    LIMIT 10
-";
-$stmt = $conn->prepare($past_bookings_sql);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$past_bookings = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Get services for dropdown
-$services_sql = "
-    SELECT id, name, country_id, visa_type_id 
-    FROM services 
-    WHERE admin_id = ? AND deleted_at IS NULL
-    ORDER BY name
-";
-$stmt = $conn->prepare($services_sql);
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-$services = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-
-// Function to get day name
-function getDayName($dayNum) {
-    $days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    return $days[$dayNum];
+// Handle status update
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_status'])) {
+    $booking_id = $_POST['booking_id'];
+    $new_status = $_POST['new_status'];
+    
+    $update_query = "UPDATE bookings SET status = ? WHERE id = ?";
+    $update_stmt = $conn->prepare($update_query);
+    $update_stmt->bind_param('si', $new_status, $booking_id);
+    
+    if ($update_stmt->execute()) {
+        // Log activity
+        $activity_query = "INSERT INTO booking_activity_logs 
+                        (booking_id, user_id, user_type, activity_type, description) 
+                        VALUES (?, ?, 'admin', 'status_changed', ?)";
+        
+        $admin_id = $_SESSION['user_id'];
+        $description = "Booking status changed to $new_status";
+        $activity_stmt = $conn->prepare($activity_query);
+        $activity_stmt->bind_param('iis', $booking_id, $admin_id, $description);
+        $activity_stmt->execute();
+        
+        $success_message = "Booking status updated successfully";
+        
+        // Get filter parameters for redirection
+        $status_filter = isset($_GET['status']) ? $_GET['status'] : 'all';
+        
+        // Redirect to prevent form resubmission
+        header("Location: bookings.php?status=$status_filter");
+        exit;
+    } else {
+        $error_message = "Error updating status: " . $conn->error;
+    }
 }
 
-// Function to format time
-function formatTime($timeStr) {
-    $time = DateTime::createFromFormat('H:i:s', $timeStr);
-    return $time ? $time->format('h:i A') : $timeStr;
+// After all header redirects, include the header file
+require_once 'includes/header.php';
+
+// Get filter parameters
+$status_filter = isset($_GET['status']) ? $_GET['status'] : 'all';
+$date_from = isset($_GET['date_from']) ? $_GET['date_from'] : '';
+$date_to = isset($_GET['date_to']) ? $_GET['date_to'] : '';
+$search = isset($_GET['search']) ? $_GET['search'] : '';
+
+// Prepare the base query
+$query = "SELECT b.*, 
+          CONCAT(u.first_name, ' ', u.last_name) as applicant_name,
+          vt.name as visa_type, 
+          st.name as service_type,
+          cm.name as consultation_mode,
+          CONCAT(tm_u.first_name, ' ', tm_u.last_name) as team_member_name
+          FROM bookings b
+          LEFT JOIN users u ON b.user_id = u.id
+          LEFT JOIN visa_types vt ON b.visa_type_id = vt.id
+          LEFT JOIN service_types st ON b.service_type_id = st.id
+          LEFT JOIN consultation_modes cm ON b.consultation_mode_id = cm.id
+          LEFT JOIN team_members tm ON b.team_member_id = tm.id
+          LEFT JOIN users tm_u ON tm.user_id = tm_u.id
+          WHERE 1=1";
+
+// Add filters
+if ($status_filter !== 'all') {
+    $query .= " AND b.status = ?";
 }
+
+if (!empty($date_from)) {
+    $query .= " AND b.booking_date >= ?";
+}
+
+if (!empty($date_to)) {
+    $query .= " AND b.booking_date <= ?";
+}
+
+if (!empty($search)) {
+    $query .= " AND (b.reference_number LIKE ? OR CONCAT(u.first_name, ' ', u.last_name) LIKE ? OR vt.name LIKE ?)";
+}
+
+$query .= " ORDER BY b.created_at DESC";
+
+// Prepare and execute the statement
+$stmt = $conn->prepare($query);
+
+// Bind parameters
+$paramTypes = '';
+$paramValues = [];
+
+if ($status_filter !== 'all') {
+    $paramTypes .= 's';
+    $paramValues[] = $status_filter;
+}
+
+if (!empty($date_from)) {
+    $paramTypes .= 's';
+    $paramValues[] = $date_from;
+}
+
+if (!empty($date_to)) {
+    $paramTypes .= 's';
+    $paramValues[] = $date_to;
+}
+
+if (!empty($search)) {
+    $paramTypes .= 'sss';
+    $paramValues[] = "%$search%";
+    $paramValues[] = "%$search%";
+    $paramValues[] = "%$search%";
+}
+
+if (!empty($paramTypes)) {
+    $stmt->bind_param($paramTypes, ...$paramValues);
+}
+
+$stmt->execute();
+$result = $stmt->get_result();
+$bookings = $result->fetch_all(MYSQLI_ASSOC);
+
+// Get team members for assignment dropdown
+$team_members_query = "SELECT tm.id, CONCAT(u.first_name, ' ', u.last_name) as name, u.email
+                      FROM team_members tm
+                      JOIN users u ON tm.user_id = u.id
+                      WHERE u.status = 'active'
+                      ORDER BY u.first_name, u.last_name";
+$team_members_result = $conn->query($team_members_query);
+$team_members = $team_members_result->fetch_all(MYSQLI_ASSOC);
 ?>
 
-<div class="page-header">
-    <div class="page-title">
-        <h1><?php echo $page_header; ?></h1>
-        <p>Manage your booking schedule and appointments</p>
-    </div>
-    <div class="page-actions">
-        <button id="add-timeslot-btn" class="btn-secondary">
-            <i class="fas fa-plus"></i> Add Timeslot
-        </button>
-        <button id="override-date-btn" class="btn-secondary">
-            <i class="fas fa-calendar-alt"></i> Set Day Off
-        </button>
-        <?php if ($user_type === 'admin'): ?>
-        <button id="update-capacity-btn" class="btn-secondary">
-            <i class="fas fa-users"></i> Set Booking Capacity
-        </button>
-        <?php endif; ?>
-    </div>
-</div>
-
-<?php if ($success_message): ?>
-    <div class="alert alert-success">
-        <i class="fas fa-check-circle"></i> <?php echo $success_message; ?>
-        <button type="button" class="close-btn"><i class="fas fa-times"></i></button>
-    </div>
-<?php endif; ?>
-
-<?php if ($error_message): ?>
-    <div class="alert alert-danger">
-        <i class="fas fa-exclamation-circle"></i> <?php echo $error_message; ?>
-        <button type="button" class="close-btn"><i class="fas fa-times"></i></button>
-    </div>
-<?php endif; ?>
-
-<div class="content-wrapper">
-    <!-- Booking Info Banner -->
-    <div class="booking-info-banner">
-        <div class="info-card">
-            <div class="info-icon">
-                <i class="fas fa-calendar-check"></i>
-            </div>
-            <div class="info-content">
-                <h3>Upcoming Bookings</h3>
-                <p><?php echo count($upcoming_bookings); ?></p>
-            </div>
-        </div>
-        
-        <div class="info-card">
-            <div class="info-icon">
-                <i class="fas fa-clock"></i>
-            </div>
-            <div class="info-content">
-                <h3>Available Timeslots</h3>
-                <p><?php echo count($timeslots); ?></p>
-            </div>
-        </div>
-        
-        <?php if ($user_type === 'admin'): ?>
-        <div class="info-card">
-            <div class="info-icon">
-                <i class="fas fa-users"></i>
-            </div>
-            <div class="info-content">
-                <h3>Concurrent Bookings</h3>
-                <p><?php echo $max_concurrent_bookings; ?></p>
-            </div>
-        </div>
-        <?php endif; ?>
-        
-        <div class="info-card">
-            <div class="info-icon booking-type-icon">
-                <i class="fas <?php echo $user_type === 'member' ? 'fa-user' : 'fa-user-tie'; ?>"></i>
-            </div>
-            <div class="info-content">
-                <h3>Account Type</h3>
-                <p><?php echo ucfirst($user_type); ?></p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Tabs -->
-    <div class="tabs-container">
-        <div class="tabs-header">
-            <button class="tab-btn active" data-tab="upcoming">Upcoming Bookings</button>
-            <button class="tab-btn" data-tab="schedule">Schedule Settings</button>
-            <button class="tab-btn" data-tab="history">Booking History</button>
-        </div>
-        
-        <div class="tab-content active" id="upcoming-tab">
-            <?php if (empty($upcoming_bookings)): ?>
-                <div class="empty-state">
-                    <div class="empty-state-icon">
-                        <i class="fas fa-calendar"></i>
-                    </div>
-                    <h3>No Upcoming Bookings</h3>
-                    <p>You don't have any upcoming appointments scheduled.</p>
-                </div>
-            <?php else: ?>
-                <div class="booking-list">
-                    <?php
-                    $current_date = '';
-                    foreach ($upcoming_bookings as $booking):
-                        $booking_date = new DateTime($booking['booking_date']);
-                        if ($current_date !== $booking['booking_date']):
-                            if ($current_date !== '') echo '</div>'; // Close previous date container
-                            $current_date = $booking['booking_date'];
-                    ?>
-                    <div class="booking-date-group">
-                        <div class="booking-date-header">
-                            <h3><?php echo $booking_date->format('l, F j, Y'); ?></h3>
-                        </div>
-                    <?php endif; ?>
-                        
-                        <div class="booking-card" data-id="<?php echo $booking['id']; ?>">
-                            <div class="booking-time">
-                                <span><?php echo formatTime($booking['start_time']); ?> - <?php echo formatTime($booking['end_time']); ?></span>
-                                <div class="booking-status <?php echo strtolower($booking['status']); ?>">
-                                    <?php echo ucfirst($booking['status']); ?>
-                                </div>
-                            </div>
-                            <div class="booking-details">
-                                <h4><?php echo htmlspecialchars($booking['service_name']); ?></h4>
-                                <div class="booking-meta">
-                                    <div class="meta-item">
-                                        <i class="fas fa-user"></i>
-                                        <span><?php echo htmlspecialchars($booking['user_email']); ?></span>
-                                    </div>
-                                    <div class="meta-item">
-                                        <i class="fas fa-comment"></i>
-                                        <span><?php echo htmlspecialchars($booking['consultation_mode']); ?></span>
-                                    </div>
-                                    <div class="meta-item">
-                                        <i class="fas fa-tag"></i>
-                                        <span>Ref: <?php echo htmlspecialchars($booking['reference_number']); ?></span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="booking-actions">
-                                <?php if ($booking['status'] === 'pending'): ?>
-                                <button class="btn-confirm confirm-booking-btn" data-id="<?php echo $booking['id']; ?>">
-                                    <i class="fas fa-check"></i> Confirm
-                                </button>
-                                <?php endif; ?>
-                                <?php if (in_array($booking['status'], ['pending', 'confirmed'])): ?>
-                                <button class="btn-edit reschedule-booking-btn" data-id="<?php echo $booking['id']; ?>">
-                                    <i class="fas fa-calendar-alt"></i> Reschedule
-                                </button>
-                                <button class="btn-cancel cancel-booking-btn" data-id="<?php echo $booking['id']; ?>">
-                                    <i class="fas fa-times"></i> Cancel
-                                </button>
-                                <?php endif; ?>
-                                <button class="btn-view view-booking-btn" data-id="<?php echo $booking['id']; ?>">
-                                    <i class="fas fa-eye"></i> View
-                                </button>
-                            </div>
-                        </div>
-                    <?php endforeach; ?>
-                    </div><!-- Close the last date container -->
-                </div>
-            <?php endif; ?>
-        </div>
-        
-        <div class="tab-content" id="schedule-tab">
-            <div class="schedule-settings">
-                <div class="schedule-card">
-                    <div class="schedule-card-header">
-                        <h3>Regular Timeslots</h3>
-                        <p>These are your regular weekly availability slots.</p>
-                    </div>
-                    <div class="schedule-card-body">
-                        <div class="weekly-schedule">
-                            <?php if (empty($timeslots)): ?>
-                                <div class="empty-schedule">
-                                    <p>No timeslots configured yet. Click "Add Timeslot" to set up your availability.</p>
-                                </div>
-                            <?php else: ?>
-                                <?php
-                                $days = [0 => [], 1 => [], 2 => [], 3 => [], 4 => [], 5 => [], 6 => []];
-                                foreach ($timeslots as $slot) {
-                                    $days[$slot['day_of_week']][] = $slot;
-                                }
-                                
-                                foreach ($days as $day_num => $day_slots):
-                                ?>
-                                    <div class="day-schedule">
-                                        <h4><?php echo getDayName($day_num); ?></h4>
-                                        <?php if (empty($day_slots)): ?>
-                                            <div class="no-slots">No slots configured</div>
-                                        <?php else: ?>
-                                            <div class="timeslot-list">
-                                                <?php foreach ($day_slots as $slot): ?>
-                                                    <div class="timeslot-item <?php echo $slot['is_available'] ? 'available' : 'unavailable'; ?>">
-                                                        <div class="timeslot-time">
-                                                            <?php echo formatTime($slot['start_time']); ?> - <?php echo formatTime($slot['end_time']); ?>
-                                                        </div>
-                                                        <div class="timeslot-details">
-                                                            <div class="timeslot-duration">
-                                                                <i class="fas fa-clock"></i> <?php echo $slot['slot_duration']; ?> min slots
-                                                            </div>
-                                                            <?php if ($slot['buffer_time'] > 0): ?>
-                                                            <div class="timeslot-buffer">
-                                                                <i class="fas fa-pause"></i> <?php echo $slot['buffer_time']; ?> min buffer
-                                                            </div>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                        <div class="timeslot-actions">
-                                                            <button class="btn-edit edit-timeslot-btn" data-id="<?php echo $slot['id']; ?>">
-                                                                <i class="fas fa-edit"></i>
-                                                            </button>
-                                                            <button class="btn-delete delete-timeslot-btn" data-id="<?php echo $slot['id']; ?>">
-                                                                <i class="fas fa-trash"></i>
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        <?php endif; ?>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="schedule-card">
-                    <div class="schedule-card-header">
-                        <h3>Date Overrides</h3>
-                        <p>Custom availability settings for specific dates.</p>
-                    </div>
-                    <div class="schedule-card-body">
-                        <?php if (empty($date_overrides)): ?>
-                            <div class="empty-overrides">
-                                <p>No date overrides configured. Click "Set Day Off" to mark specific dates as unavailable.</p>
-                            </div>
-                        <?php else: ?>
-                            <div class="override-list">
-                                <?php foreach ($date_overrides as $override): 
-                                    $override_date = new DateTime($override['date']);
-                                ?>
-                                    <div class="override-item <?php echo $override['is_available'] ? 'available' : 'unavailable'; ?>">
-                                        <div class="override-date">
-                                            <?php echo $override_date->format('l, F j, Y'); ?>
-                                        </div>
-                                        <div class="override-status">
-                                            <?php echo $override['is_available'] ? 'Available' : 'Unavailable'; ?>
-                                        </div>
-                                        <?php if (!empty($override['reason'])): ?>
-                                        <div class="override-reason">
-                                            <i class="fas fa-comment"></i> <?php echo htmlspecialchars($override['reason']); ?>
-                                        </div>
-                                        <?php endif; ?>
-                                        <div class="override-actions">
-                                            <button class="btn-edit edit-override-btn" data-id="<?php echo $override['id']; ?>">
-                                                <i class="fas fa-edit"></i>
-                                            </button>
-                                            <button class="btn-delete delete-override-btn" data-id="<?php echo $override['id']; ?>">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                
-                <?php if ($entity_type === 'company'): ?>
-                <div class="schedule-card">
-                    <div class="schedule-card-header">
-                        <h3>Company Booking Capacity</h3>
-                        <p>Maximum number of concurrent bookings your company can handle.</p>
-                    </div>
-                    <div class="schedule-card-body">
-                        <div class="capacity-info">
-                            <div class="capacity-value">
-                                <span><?php echo $max_concurrent_bookings; ?></span>
-                                <p>concurrent bookings</p>
-                            </div>
-                            <div class="capacity-description">
-                                <p>This is the maximum number of bookings that can be made for the same timeslot. For individual professionals, this is always 1.</p>
-                            </div>
-                            <button id="capacity-edit-btn" class="btn-secondary">
-                                <i class="fas fa-edit"></i> Change Capacity
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <?php endif; ?>
-            </div>
-        </div>
-        
-        <div class="tab-content" id="history-tab">
-            <?php if (empty($past_bookings)): ?>
-                <div class="empty-state">
-                    <div class="empty-state-icon">
-                        <i class="fas fa-history"></i>
-                    </div>
-                    <h3>No Past Bookings</h3>
-                    <p>Your booking history will appear here once you have completed appointments.</p>
-                </div>
-            <?php else: ?>
-                <div class="booking-history">
-                    <table class="history-table">
-                        <thead>
-                            <tr>
-                                <th>Date & Time</th>
-                                <th>Client</th>
-                                <th>Service</th>
-                                <th>Mode</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($past_bookings as $booking): 
-                                $booking_date = new DateTime($booking['booking_date']);
-                            ?>
-                                <tr class="booking-history-row <?php echo strtolower($booking['status']); ?>">
-                                    <td>
-                                        <div class="history-date-time">
-                                            <div class="history-date"><?php echo $booking_date->format('M j, Y'); ?></div>
-                                            <div class="history-time"><?php echo formatTime($booking['start_time']); ?></div>
-                                        </div>
-                                    </td>
-                                    <td><?php echo htmlspecialchars($booking['user_email']); ?></td>
-                                    <td><?php echo htmlspecialchars($booking['service_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($booking['consultation_mode']); ?></td>
-                                    <td>
-                                        <span class="status-badge <?php echo strtolower($booking['status']); ?>">
-                                            <?php echo ucfirst($booking['status']); ?>
-                                        </span>
-                                    </td>
-                                    <td>
-                                        <button class="btn-view view-booking-btn" data-id="<?php echo $booking['id']; ?>">
-                                            <i class="fas fa-eye"></i> View
-                                        </button>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php endif; ?>
-        </div>
-    </div>
-</div>
-
-<!-- Add/Edit Timeslot Modal -->
-<div class="modal" id="timeslot-modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 id="timeslot-modal-title">Add Timeslot</h2>
-            <button class="modal-close"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <form id="timeslot-form" method="POST" action="">
-                <input type="hidden" name="action" id="timeslot-form-action" value="add_timeslot">
-                <input type="hidden" name="timeslot_id" id="timeslot-id" value="">
-                
+<div class="content">
+    <h1>Bookings Management</h1>
+    <p>Manage booking assignments, schedules, and status updates for client consultations.</p>
+    
+    <?php if (isset($error_message)): ?>
+        <div class="alert alert-danger"><?php echo $error_message; ?></div>
+    <?php endif; ?>
+    
+    <?php if (isset($success_message)): ?>
+        <div class="alert alert-success"><?php echo $success_message; ?></div>
+    <?php endif; ?>
+    
+    <!-- Filters Section -->
+    <div class="section">
+        <h2>Filter Bookings</h2>
+        <div class="filter-card">
+            <form action="bookings.php" method="GET" class="filter-form">
                 <div class="form-group">
-                    <label for="day_of_week">Day of Week</label>
-                    <select id="day_of_week" name="day_of_week" required>
-                        <option value="0">Sunday</option>
-                        <option value="1">Monday</option>
-                        <option value="2">Tuesday</option>
-                        <option value="3">Wednesday</option>
-                        <option value="4">Thursday</option>
-                        <option value="5">Friday</option>
-                        <option value="6">Saturday</option>
+                    <label for="status">Status</label>
+                    <select name="status" id="status" class="form-control">
+                        <option value="all" <?php echo $status_filter === 'all' ? 'selected' : ''; ?>>All Statuses</option>
+                        <option value="pending_assignment" <?php echo $status_filter === 'pending_assignment' ? 'selected' : ''; ?>>Pending Assignment</option>
+                        <option value="assigned" <?php echo $status_filter === 'assigned' ? 'selected' : ''; ?>>Assigned</option>
+                        <option value="confirmed" <?php echo $status_filter === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
+                        <option value="cancelled" <?php echo $status_filter === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
+                        <option value="completed" <?php echo $status_filter === 'completed' ? 'selected' : ''; ?>>Completed</option>
+                        <option value="no_show" <?php echo $status_filter === 'no_show' ? 'selected' : ''; ?>>No Show</option>
                     </select>
                 </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="start_time">Start Time</label>
-                        <input type="time" id="start_time" name="start_time" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="end_time">End Time</label>
-                        <input type="time" id="end_time" name="end_time" required>
-                    </div>
+                <div class="form-group">
+                    <label for="date_from">Date From</label>
+                    <input type="date" name="date_from" id="date_from" class="form-control" value="<?php echo $date_from; ?>">
                 </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="slot_duration">Slot Duration (minutes)</label>
-                        <input type="number" id="slot_duration" name="slot_duration" min="15" max="240" value="60" required>
-                        <small class="form-text">Length of each appointment slot</small>
-                    </div>
-                    <div class="form-group">
-                        <label for="buffer_time">Buffer Time (minutes)</label>
-                        <input type="number" id="buffer_time" name="buffer_time" min="0" max="60" value="0">
-                        <small class="form-text">Break time between appointments</small>
-                    </div>
+                <div class="form-group">
+                    <label for="date_to">Date To</label>
+                    <input type="date" name="date_to" id="date_to" class="form-control" value="<?php echo $date_to; ?>">
                 </div>
-                
-                <div class="form-checkbox">
-                    <input type="checkbox" id="is_available" name="is_available" checked>
-                    <label for="is_available">This timeslot is available for bookings</label>
+                <div class="form-group">
+                    <label for="search">Search</label>
+                    <input type="text" name="search" id="search" class="form-control" placeholder="Reference, name, visa type..." value="<?php echo $search; ?>">
                 </div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
-                    <button type="submit" class="btn-primary" id="save-timeslot-btn">Save Timeslot</button>
+                <div class="form-buttons">
+                    <button type="submit" class="btn filter-btn">
+                        <i class="fas fa-search"></i> Filter
+                    </button>
+                    <a href="bookings.php" class="btn reset-btn">
+                        <i class="fas fa-sync-alt"></i> Reset
+                    </a>
                 </div>
             </form>
         </div>
     </div>
-</div>
-
-<!-- Date Override Modal -->
-<div class="modal" id="override-modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2 id="override-modal-title">Set Date Availability</h2>
-            <button class="modal-close"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <form id="override-form" method="POST" action="">
-                <input type="hidden" name="action" value="add_date_override">
-                <input type="hidden" name="override_id" id="override-id" value="">
-                
-                <div class="form-group">
-                    <label for="override_date">Date</label>
-                    <input type="date" id="override_date" name="override_date" required>
-                </div>
-                
-                <div class="form-radio-group">
-                    <div class="form-radio">
-                        <input type="radio" id="date_unavailable" name="is_date_available" value="0" checked>
-                        <label for="date_unavailable">Mark as Unavailable (Day Off)</label>
-                    </div>
-                    <div class="form-radio">
-                        <input type="radio" id="date_available" name="is_date_available" value="1">
-                        <label for="date_available">Mark as Available</label>
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label for="reason">Reason (Optional)</label>
-                    <textarea id="reason" name="reason" rows="2"></textarea>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
-                    <button type="submit" class="btn-primary" id="save-override-btn">Save Override</button>
-                </div>
-            </form>
+    
+    <!-- Bookings Section -->
+    <div class="section">
+        <h2>Bookings</h2>
+        <div class="table-responsive">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Reference</th>
+                        <th>Applicant</th>
+                        <th>Visa Type</th>
+                        <th>Service</th>
+                        <th>Mode</th>
+                        <th>Date & Time</th>
+                        <th>Status</th>
+                        <th>Payment</th>
+                        <th>Team Member</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (count($bookings) > 0): ?>
+                        <?php foreach ($bookings as $booking): ?>
+                            <tr class="booking-row status-<?php echo $booking['status']; ?>">
+                                <td><?php echo htmlspecialchars($booking['reference_number']); ?></td>
+                                <td><?php echo htmlspecialchars($booking['applicant_name']); ?></td>
+                                <td><?php echo htmlspecialchars($booking['visa_type']); ?></td>
+                                <td><?php echo htmlspecialchars($booking['service_type']); ?></td>
+                                <td><?php echo htmlspecialchars($booking['consultation_mode']); ?></td>
+                                <td>
+                                    <?php if ($booking['booking_date']): ?>
+                                        <?php echo date('M d, Y', strtotime($booking['booking_date'])); ?><br>
+                                        <?php echo date('h:i A', strtotime($booking['start_time'])); ?> - 
+                                        <?php echo date('h:i A', strtotime($booking['end_time'])); ?>
+                                    <?php else: ?>
+                                        <span class="badge warning">Not Scheduled</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <span class="badge <?php echo $booking['status']; ?>">
+                                        <?php echo str_replace('_', ' ', ucfirst($booking['status'])); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge <?php echo $booking['payment_status']; ?>">
+                                        <?php echo ucfirst($booking['payment_status']); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <?php if ($booking['team_member_name']): ?>
+                                        <?php echo htmlspecialchars($booking['team_member_name']); ?>
+                                    <?php else: ?>
+                                        <span class="badge warning">Not Assigned</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="actions">
+                                    <button class="action-btn view-btn" onclick="location.href='view_booking.php?id=<?php echo $booking['id']; ?>'">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                    <button class="action-btn assign-btn" data-booking-id="<?php echo $booking['id']; ?>"
+                                        data-booking-reference="<?php echo $booking['reference_number']; ?>"
+                                        data-booking-date="<?php echo $booking['booking_date']; ?>"
+                                        data-booking-start="<?php echo $booking['start_time']; ?>"
+                                        data-booking-end="<?php echo $booking['end_time']; ?>"
+                                        data-booking-team-member="<?php echo $booking['team_member_id']; ?>"
+                                        data-booking-notes="<?php echo htmlspecialchars($booking['admin_notes']); ?>">
+                                        <i class="fas fa-user-plus"></i>
+                                    </button>
+                                    <button class="action-btn status-btn" 
+                                        data-booking-id="<?php echo $booking['id']; ?>"
+                                        data-booking-reference="<?php echo $booking['reference_number']; ?>"
+                                        data-current-status="<?php echo $booking['status']; ?>">
+                                        <i class="fas fa-edit"></i>
+                                    </button>
+                                    <button class="action-btn payment-btn" onclick="location.href='booking_payments.php?id=<?php echo $booking['id']; ?>'">
+                                        <i class="fas fa-money-bill-wave"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="10" class="no-data">No bookings found</td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
 
-<!-- Booking Capacity Modal -->
-<?php if ($entity_type === 'company'): ?>
-<div class="modal" id="capacity-modal">
+<!-- Modal for assigning a booking -->
+<div class="modal" id="assign-modal">
     <div class="modal-content">
-        <div class="modal-header">
-            <h2>Set Booking Capacity</h2>
-            <button class="modal-close"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <form id="capacity-form" method="POST" action="">
-                <input type="hidden" name="action" value="update_capacity">
-                
+        <span class="close">&times;</span>
+        <h2>Assign Booking</h2>
+        <form id="assign-booking-form" method="POST" action="bookings.php">
+            <input type="hidden" name="booking_id" id="modal-booking-id">
+            
+            <div class="form-group">
+                <label for="booking_reference">Booking Reference</label>
+                <input type="text" class="form-control" id="booking_reference" readonly>
+            </div>
+            
+            <div class="form-group">
+                <label for="team_member_id">Assign to Team Member*</label>
+                <select name="team_member_id" id="team_member_id" class="form-control" required>
+                    <option value="">-- Select Team Member --</option>
+                    <?php foreach ($team_members as $member): ?>
+                        <option value="<?php echo $member['id']; ?>">
+                            <?php echo htmlspecialchars($member['name']); ?> (<?php echo htmlspecialchars($member['email']); ?>)
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            
+            <div class="form-row">
                 <div class="form-group">
-                    <label for="max_concurrent_bookings">Maximum Concurrent Bookings</label>
-                    <input type="number" id="max_concurrent_bookings" name="max_concurrent_bookings" min="1" max="20" value="<?php echo $max_concurrent_bookings; ?>" required>
-                    <small class="form-text">Maximum number of bookings that can be made for the same timeslot</small>
+                    <label for="booking_date">Date*</label>
+                    <input type="date" name="booking_date" id="booking_date" class="form-control" required>
                 </div>
-                
-                <div class="capacity-explanation">
-                    <p><strong>What does this mean?</strong></p>
-                    <p>If set to 3, your company can accept up to 3 bookings for the same time period. This is useful for companies with multiple team members who can handle concurrent appointments.</p>
+                <div class="form-group">
+                    <label for="start_time">Start Time*</label>
+                    <input type="time" name="start_time" id="start_time" class="form-control" required>
                 </div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
-                    <button type="submit" class="btn-primary">Save Capacity</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
-
-<!-- View Booking Modal -->
-<div class="modal" id="view-booking-modal">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h2>Booking Details</h2>
-            <button class="modal-close"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <div id="booking-details-container">
-                <!-- Booking details will be loaded here via AJAX -->
-                <div class="loading-spinner">
-                    <i class="fas fa-spinner fa-spin"></i> Loading booking details...
+                <div class="form-group">
+                    <label for="end_time">End Time*</label>
+                    <input type="time" name="end_time" id="end_time" class="form-control" required>
                 </div>
             </div>
-        </div>
+            
+            <div class="form-group">
+                <label for="admin_notes">Admin Notes</label>
+                <textarea name="admin_notes" id="admin_notes" class="form-control" rows="3"></textarea>
+            </div>
+            
+            <div class="form-buttons">
+                <button type="button" class="btn cancel-btn" id="cancel-assign">Cancel</button>
+                <button type="submit" name="assign_booking" class="btn submit-btn">Assign Booking</button>
+            </div>
+        </form>
     </div>
 </div>
 
-<!-- Update Booking Status Modal -->
-<div class="modal" id="update-status-modal">
+<!-- Modal for updating status -->
+<div class="modal" id="status-modal">
     <div class="modal-content">
-        <div class="modal-header">
-            <h2 id="status-modal-title">Update Booking Status</h2>
-            <button class="modal-close"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="modal-body">
-            <form id="update-status-form" method="POST" action="">
-                <input type="hidden" name="action" value="update_booking_status">
-                <input type="hidden" name="booking_id" id="status-booking-id" value="">
-                <input type="hidden" name="status" id="booking-status" value="">
-                
-                <div class="status-message" id="status-message"></div>
-                
-                <div class="form-group">
-                    <label for="notes">Notes</label>
-                    <textarea id="notes" name="notes" rows="3"></textarea>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
-                    <button type="submit" class="btn-primary" id="update-status-btn">Update Status</button>
-                </div>
-            </form>
-        </div>
+        <span class="close">&times;</span>
+        <h2>Update Booking Status</h2>
+        <form id="update-status-form" method="POST" action="bookings.php">
+            <input type="hidden" name="booking_id" id="status-booking-id">
+            
+            <div class="form-group">
+                <label>Booking Reference: <span id="status-booking-reference"></span></label>
+            </div>
+            
+            <div class="form-group">
+                <label for="new_status">New Status*</label>
+                <select name="new_status" id="new_status" class="form-control" required>
+                    <option value="pending_assignment">Pending Assignment</option>
+                    <option value="assigned">Assigned</option>
+                    <option value="confirmed">Confirmed</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="completed">Completed</option>
+                    <option value="no_show">No Show</option>
+                </select>
+            </div>
+            
+            <div class="form-buttons">
+                <button type="button" class="btn cancel-btn" id="cancel-status">Cancel</button>
+                <button type="submit" name="update_status" class="btn submit-btn">Update Status</button>
+            </div>
+        </form>
     </div>
 </div>
 
-<!-- JavaScript for Dynamic Interaction -->
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Close alerts
-    const closeButtons = document.querySelectorAll('.alert .close-btn');
-    closeButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            this.parentElement.remove();
-        });
+// Modal functionality
+const assignModal = document.getElementById('assign-modal');
+const statusModal = document.getElementById('status-modal');
+const closeButtons = document.querySelectorAll('.close');
+const cancelAssignBtn = document.getElementById('cancel-assign');
+const cancelStatusBtn = document.getElementById('cancel-status');
+
+// Open assign modal
+document.querySelectorAll('.assign-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const bookingId = this.dataset.bookingId;
+        const reference = this.dataset.bookingReference;
+        const date = this.dataset.bookingDate;
+        const start = this.dataset.bookingStart;
+        const end = this.dataset.bookingEnd;
+        const teamMember = this.dataset.bookingTeamMember;
+        const notes = this.dataset.bookingNotes;
+        
+        document.getElementById('modal-booking-id').value = bookingId;
+        document.getElementById('booking_reference').value = reference;
+        document.getElementById('booking_date').value = date;
+        document.getElementById('start_time').value = start;
+        document.getElementById('end_time').value = end;
+        document.getElementById('team_member_id').value = teamMember;
+        document.getElementById('admin_notes').value = notes;
+        
+        assignModal.style.display = 'block';
     });
-    
-    // Tab switching
-    const tabButtons = document.querySelectorAll('.tab-btn');
-    const tabContents = document.querySelectorAll('.tab-content');
-    
-    tabButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            const tabId = this.getAttribute('data-tab');
-            
-            // Deactivate all tabs
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            tabContents.forEach(content => content.classList.remove('active'));
-            
-            // Activate selected tab
-            this.classList.add('active');
-            document.getElementById(tabId + '-tab').classList.add('active');
-        });
+});
+
+// Open status modal
+document.querySelectorAll('.status-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const bookingId = this.dataset.bookingId;
+        const reference = this.dataset.bookingReference;
+        const currentStatus = this.dataset.currentStatus;
+        
+        document.getElementById('status-booking-id').value = bookingId;
+        document.getElementById('status-booking-reference').textContent = reference;
+        document.getElementById('new_status').value = currentStatus;
+        
+        statusModal.style.display = 'block';
     });
-    
-    // Show timeslot modal
-    const addTimeslotBtn = document.getElementById('add-timeslot-btn');
-    const timeslotModal = document.getElementById('timeslot-modal');
-    
-    addTimeslotBtn?.addEventListener('click', function() {
-        // Reset form
-        document.getElementById('timeslot-form').reset();
-        document.getElementById('timeslot-form-action').value = 'add_timeslot';
-        document.getElementById('timeslot-id').value = '';
-        document.getElementById('timeslot-modal-title').textContent = 'Add Timeslot';
-        
-        // Show modal
-        timeslotModal.classList.add('show');
+});
+
+// Close buttons functionality
+closeButtons.forEach(btn => {
+    btn.addEventListener('click', function() {
+        this.closest('.modal').style.display = 'none';
     });
-    
-    // Show date override modal
-    const overrideDateBtn = document.getElementById('override-date-btn');
-    const overrideModal = document.getElementById('override-modal');
-    
-    overrideDateBtn?.addEventListener('click', function() {
-        // Reset form
-        document.getElementById('override-form').reset();
-        document.getElementById('override-id').value = '';
-        
-        // Set minimum date to today
-        const dateInput = document.getElementById('override_date');
-        const today = new Date().toISOString().split('T')[0];
-        dateInput.setAttribute('min', today);
-        dateInput.value = today;
-        
-        // Show modal
-        overrideModal.classList.add('show');
+});
+
+// Cancel buttons
+if (cancelAssignBtn) {
+    cancelAssignBtn.addEventListener('click', function() {
+        assignModal.style.display = 'none';
     });
-    
-    // Show capacity modal
-    const updateCapacityBtn = document.getElementById('update-capacity-btn');
-    const capacityEditBtn = document.getElementById('capacity-edit-btn');
-    const capacityModal = document.getElementById('capacity-modal');
-    
-    [updateCapacityBtn, capacityEditBtn].forEach(btn => {
-        btn?.addEventListener('click', function() {
-            // Show modal
-            capacityModal.classList.add('show');
-        });
+}
+
+if (cancelStatusBtn) {
+    cancelStatusBtn.addEventListener('click', function() {
+        statusModal.style.display = 'none';
     });
-    
-    // Confirm booking
-    const confirmBookingBtns = document.querySelectorAll('.confirm-booking-btn');
-    confirmBookingBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const bookingId = this.getAttribute('data-id');
-            document.getElementById('status-booking-id').value = bookingId;
-            document.getElementById('booking-status').value = 'confirmed';
-            document.getElementById('status-modal-title').textContent = 'Confirm Booking';
-            document.getElementById('status-message').innerHTML = 'Are you sure you want to confirm this booking? This will notify the client that their appointment is confirmed.';
-            document.getElementById('update-status-btn').textContent = 'Confirm Booking';
-            document.getElementById('update-status-modal').classList.add('show');
-        });
-    });
-    
-    // Cancel booking
-    const cancelBookingBtns = document.querySelectorAll('.cancel-booking-btn');
-    cancelBookingBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const bookingId = this.getAttribute('data-id');
-            document.getElementById('status-booking-id').value = bookingId;
-            document.getElementById('booking-status').value = 'cancelled';
-            document.getElementById('status-modal-title').textContent = 'Cancel Booking';
-            document.getElementById('status-message').innerHTML = '<strong class="text-danger">Warning: This will cancel the booking.</strong> Please provide a reason for the cancellation:';
-            document.getElementById('update-status-btn').textContent = 'Cancel Booking';
-            document.getElementById('update-status-modal').classList.add('show');
-        });
-    });
-    
-    // View booking details
-    const viewBookingBtns = document.querySelectorAll('.view-booking-btn');
-    viewBookingBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-            const bookingId = this.getAttribute('data-id');
-            const detailsContainer = document.getElementById('booking-details-container');
-            
-            // Show loading state
-            detailsContainer.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Loading booking details...</div>';
-            document.getElementById('view-booking-modal').classList.add('show');
-            
-            // Fetch booking details
-            fetch(`ajax/get_booking.php?booking_id=${bookingId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        displayBookingDetails(data.booking);
-                    } else {
-                        detailsContainer.innerHTML = `<div class="error-message">${data.error || 'Error loading booking details'}</div>`;
-                    }
-                })
-                .catch(error => {
-                    detailsContainer.innerHTML = '<div class="error-message">Failed to load booking details. Please try again.</div>';
-                });
-        });
-    });
-    
-    function displayBookingDetails(booking) {
-        const detailsContainer = document.getElementById('booking-details-container');
-        
-        // Format date and time
-        const bookingDate = new Date(booking.booking_date);
-        const formattedDate = bookingDate.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-        
-        // Build HTML for details
-        let html = `
-            <div class="booking-detail-header">
-                <div class="detail-reference">Ref: ${booking.reference_number}</div>
-                <div class="detail-status ${booking.status}">${booking.status}</div>
-            </div>
-            
-            <div class="booking-detail-section">
-                <h3>Appointment Details</h3>
-                <div class="detail-item">
-                    <div class="detail-label">Date</div>
-                    <div class="detail-value">${formattedDate}</div>
-                </div>
-                <div class="detail-item">
-                    <div class="detail-label">Time</div>
-                    <div class="detail-value">${formatTime(booking.start_time)} - ${formatTime(booking.end_time)}</div>
-                </div>
-                <div class="detail-item">
-                    <div class="detail-label">Service</div>
-                    <div class="detail-value">${booking.service_name}</div>
-                </div>
-                <div class="detail-item">
-                    <div class="detail-label">Consultation Mode</div>
-                    <div class="detail-value">${booking.consultation_mode}</div>
-                </div>
-            </div>
-            
-            <div class="booking-detail-section">
-                <h3>Client Information</h3>
-                <div class="detail-item">
-                    <div class="detail-label">Email</div>
-                    <div class="detail-value">${booking.user_email}</div>
-                </div>
-                ${booking.user_phone ? `
-                <div class="detail-item">
-                    <div class="detail-label">Phone</div>
-                    <div class="detail-value">${booking.user_phone}</div>
-                </div>` : ''}
-            </div>
-        `;
-        
-        // Add notes if available
-        if (booking.notes) {
-            html += `
-                <div class="booking-detail-section">
-                    <h3>Client Notes</h3>
-                    <div class="detail-notes">${booking.notes}</div>
-                </div>
-            `;
-        }
-        
-        // Add professional notes if available
-        if (booking.professional_notes) {
-            html += `
-                <div class="booking-detail-section">
-                    <h3>Your Notes</h3>
-                    <div class="detail-notes">${booking.professional_notes}</div>
-                </div>
-            `;
-        }
-        
-        // Add cancellation info if cancelled
-        if (booking.status === 'cancelled') {
-            html += `
-                <div class="booking-detail-section">
-                    <h3>Cancellation Details</h3>
-                    <div class="detail-item">
-                        <div class="detail-label">Cancelled On</div>
-                        <div class="detail-value">${new Date(booking.cancellation_date).toLocaleString()}</div>
-                    </div>
-                    ${booking.cancellation_reason ? `
-                    <div class="detail-item">
-                        <div class="detail-label">Reason</div>
-                        <div class="detail-value">${booking.cancellation_reason}</div>
-                    </div>` : ''}
-                </div>
-            `;
-        }
-        
-        // Add action buttons at bottom
-        html += `
-            <div class="booking-detail-actions">
-                ${(booking.status === 'pending') ? `
-                <button class="btn-confirm confirm-from-detail-btn" data-id="${booking.id}">
-                    <i class="fas fa-check"></i> Confirm
-                </button>` : ''}
-                
-                ${(booking.status === 'pending' || booking.status === 'confirmed') ? `
-                <button class="btn-edit reschedule-from-detail-btn" data-id="${booking.id}">
-                    <i class="fas fa-calendar-alt"></i> Reschedule
-                </button>
-                <button class="btn-cancel cancel-from-detail-btn" data-id="${booking.id}">
-                    <i class="fas fa-times"></i> Cancel
-                </button>` : ''}
-                
-                ${(booking.status === 'confirmed' && new Date(`${booking.booking_date} ${booking.start_time}`) <= new Date()) ? `
-                <button class="btn-complete complete-from-detail-btn" data-id="${booking.id}">
-                    <i class="fas fa-check-circle"></i> Mark Completed
-                </button>
-                <button class="btn-noshow noshow-from-detail-btn" data-id="${booking.id}">
-                    <i class="fas fa-user-slash"></i> No Show
-                </button>` : ''}
-            </div>
-        `;
-        
-        detailsContainer.innerHTML = html;
-        
-        // Add event listeners to new buttons
-        document.querySelector('.confirm-from-detail-btn')?.addEventListener('click', function() {
-            const bookingId = this.getAttribute('data-id');
-            document.getElementById('status-booking-id').value = bookingId;
-            document.getElementById('booking-status').value = 'confirmed';
-            document.getElementById('status-modal-title').textContent = 'Confirm Booking';
-            document.getElementById('status-message').innerHTML = 'Are you sure you want to confirm this booking? This will notify the client that their appointment is confirmed.';
-            document.getElementById('update-status-btn').textContent = 'Confirm Booking';
-            document.getElementById('view-booking-modal').classList.remove('show');
-            document.getElementById('update-status-modal').classList.add('show');
-        });
-        
-        document.querySelector('.cancel-from-detail-btn')?.addEventListener('click', function() {
-            const bookingId = this.getAttribute('data-id');
-            document.getElementById('status-booking-id').value = bookingId;
-            document.getElementById('booking-status').value = 'cancelled';
-            document.getElementById('status-modal-title').textContent = 'Cancel Booking';
-            document.getElementById('status-message').innerHTML = '<strong class="text-danger">Warning: This will cancel the booking.</strong> Please provide a reason for the cancellation:';
-            document.getElementById('update-status-btn').textContent = 'Cancel Booking';
-            document.getElementById('view-booking-modal').classList.remove('show');
-            document.getElementById('update-status-modal').classList.add('show');
-        });
-        
-        document.querySelector('.complete-from-detail-btn')?.addEventListener('click', function() {
-            const bookingId = this.getAttribute('data-id');
-            document.getElementById('status-booking-id').value = bookingId;
-            document.getElementById('booking-status').value = 'completed';
-            document.getElementById('status-modal-title').textContent = 'Complete Booking';
-            document.getElementById('status-message').innerHTML = 'Mark this booking as completed? Add any notes about the appointment:';
-            document.getElementById('update-status-btn').textContent = 'Mark Completed';
-            document.getElementById('view-booking-modal').classList.remove('show');
-            document.getElementById('update-status-modal').classList.add('show');
-        });
-        
-        document.querySelector('.noshow-from-detail-btn')?.addEventListener('click', function() {
-            const bookingId = this.getAttribute('data-id');
-            document.getElementById('status-booking-id').value = bookingId;
-            document.getElementById('booking-status').value = 'no_show';
-            document.getElementById('status-modal-title').textContent = 'Mark as No Show';
-            document.getElementById('status-message').innerHTML = 'Mark this client as a no-show? Add any notes:';
-            document.getElementById('update-status-btn').textContent = 'Mark as No Show';
-            document.getElementById('view-booking-modal').classList.remove('show');
-            document.getElementById('update-status-modal').classList.add('show');
-        });
+}
+
+// Close modal when clicking outside
+window.addEventListener('click', function(event) {
+    if (event.target === assignModal) {
+        assignModal.style.display = 'none';
     }
-    
-    // Helper function to format time
-    function formatTime(timeStr) {
-        const [hours, minutes] = timeStr.split(':');
-        const hour = parseInt(hours);
-        const amPm = hour >= 12 ? 'PM' : 'AM';
-        const hour12 = hour % 12 || 12;
-        return `${hour12}:${minutes} ${amPm}`;
+    if (event.target === statusModal) {
+        statusModal.style.display = 'none';
     }
-    
-    // Close modals
-    const modalCloseButtons = document.querySelectorAll('.modal-close, .modal-cancel');
-    
-    modalCloseButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            const modal = this.closest('.modal');
-            modal.classList.remove('show');
-        });
-    });
-    
-    // Close modal when clicking outside
-    window.addEventListener('click', function(event) {
-        const modals = document.querySelectorAll('.modal');
-        modals.forEach(modal => {
-            if (event.target === modal) {
-                modal.classList.remove('show');
-            }
-        });
-    });
 });
 </script>
 

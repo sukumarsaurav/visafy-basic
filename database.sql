@@ -432,92 +432,85 @@ CREATE TABLE `application_comments` (
   CONSTRAINT `app_comments_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 -- Time slots configuration table (for recurring timeslots)
-CREATE TABLE `team_member_timeslots` (
+-- Team Member Service Capabilities
+CREATE TABLE `team_member_service_capabilities` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `team_member_id` int(11) NOT NULL COMMENT 'Reference to team_members table',
-  `day_of_week` tinyint(1) NOT NULL COMMENT '0=Sunday, 1=Monday, etc.',
-  `start_time` time NOT NULL,
-  `end_time` time NOT NULL,
-  `is_available` tinyint(1) NOT NULL DEFAULT 1 COMMENT 'Whether this timeslot is generally available',
-  `slot_duration` int(11) NOT NULL DEFAULT 60 COMMENT 'Duration in minutes',
-  `buffer_time` int(11) NOT NULL DEFAULT 0 COMMENT 'Buffer time between slots in minutes',
+  `team_member_id` int(11) NOT NULL,
+  `visa_type_id` int(11) NOT NULL,
+  `service_type_id` int(11) NOT NULL,
+  `consultation_mode_id` int(11) NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  KEY `idx_timeslot_member` (`team_member_id`),
-  KEY `idx_timeslot_day` (`day_of_week`),
-  CONSTRAINT `timeslot_team_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE CASCADE
+  UNIQUE KEY `unique_capability` (`team_member_id`, `visa_type_id`, `service_type_id`, `consultation_mode_id`),
+  KEY `idx_capability_member` (`team_member_id`),
+  KEY `idx_capability_visa` (`visa_type_id`),
+  KEY `idx_capability_service` (`service_type_id`),
+  CONSTRAINT `capability_team_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `capability_visa_type_id_fk` FOREIGN KEY (`visa_type_id`) REFERENCES `visa_types` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `capability_service_type_id_fk` FOREIGN KEY (`service_type_id`) REFERENCES `service_types` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `capability_mode_id_fk` FOREIGN KEY (`consultation_mode_id`) REFERENCES `consultation_modes` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Specific date availability overrides
-CREATE TABLE `team_member_availability_overrides` (
+-- Team Member Availability
+CREATE TABLE `team_member_availability` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `team_member_id` int(11) NOT NULL COMMENT 'Reference to team_members table',
+  `team_member_id` int(11) NOT NULL,
   `date` date NOT NULL,
-  `is_available` tinyint(1) NOT NULL COMMENT '0=Unavailable (day off), 1=Available',
-  `reason` varchar(255) DEFAULT NULL COMMENT 'Reason for availability change',
+  `start_time` time NOT NULL,
+  `end_time` time NOT NULL,
+  `is_available` tinyint(1) NOT NULL DEFAULT 1,
+  `reason` varchar(255) DEFAULT NULL COMMENT 'Optional reason for unavailability',
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `member_date_unique` (`team_member_id`, `date`),
-  KEY `idx_override_member` (`team_member_id`),
-  KEY `idx_override_date` (`date`),
+  KEY `idx_availability_member` (`team_member_id`),
+  KEY `idx_availability_date` (`date`),
   CONSTRAINT `availability_team_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Specific timeslot overrides for individual dates
-CREATE TABLE `team_member_timeslot_overrides` (
+-- Service Configurations (as provided by you)
+CREATE TABLE `visa_service_configurations` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
-  `team_member_id` int(11) NOT NULL COMMENT 'Reference to team_members table',
-  `date` date NOT NULL,
-  `start_time` time NOT NULL,
-  `end_time` time NOT NULL,
-  `is_available` tinyint(1) NOT NULL COMMENT '0=Unavailable, 1=Available',
-  `reason` varchar(255) DEFAULT NULL,
+  `visa_type_id` int(11) NOT NULL,
+  `service_type_id` int(11) NOT NULL,
+  `consultation_mode_id` int(11) NOT NULL,
+  `price` decimal(10,2) NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT 1,
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  KEY `idx_timeslot_override_member` (`team_member_id`),
-  KEY `idx_timeslot_override_date` (`date`),
-  CONSTRAINT `timeslot_override_team_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE CASCADE
+  UNIQUE KEY `visa_service_mode_unique` (`visa_type_id`, `service_type_id`, `consultation_mode_id`),
+  KEY `idx_config_visa_type` (`visa_type_id`),
+  KEY `idx_config_service_type` (`service_type_id`),
+  KEY `idx_config_mode` (`consultation_mode_id`),
+  CONSTRAINT `config_visa_type_id_fk` FOREIGN KEY (`visa_type_id`) REFERENCES `visa_types` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `config_service_type_id_fk` FOREIGN KEY (`service_type_id`) REFERENCES `service_types` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `config_mode_id_fk` FOREIGN KEY (`consultation_mode_id`) REFERENCES `consultation_modes` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Service-specific booking settings for visa services
-CREATE TABLE `visa_service_booking_settings` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `visa_type_id` int(11) NOT NULL COMMENT 'Reference to visa_types table',
-  `service_type_id` int(11) NOT NULL COMMENT 'Reference to service_types table',
-  `duration` int(11) NOT NULL DEFAULT 60 COMMENT 'Duration in minutes',
-  `buffer_time` int(11) NOT NULL DEFAULT 0 COMMENT 'Buffer time between bookings in minutes',
-  `advance_booking_days` int(11) NOT NULL DEFAULT 30 COMMENT 'How many days in advance clients can book',
-  `min_booking_notice` int(11) NOT NULL DEFAULT 24 COMMENT 'Minimum notice required in hours',
-  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `visa_service_unique` (`visa_type_id`, `service_type_id`),
-  KEY `idx_booking_settings_visa` (`visa_type_id`),
-  KEY `idx_booking_settings_service` (`service_type_id`),
-  CONSTRAINT `settings_visa_type_id_fk` FOREIGN KEY (`visa_type_id`) REFERENCES `visa_types` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `settings_service_type_id_fk` FOREIGN KEY (`service_type_id`) REFERENCES `service_types` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Bookings table
+-- Modified Bookings Table for Admin Assignment
 CREATE TABLE `bookings` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `reference_number` varchar(20) NOT NULL,
   `user_id` int(11) NOT NULL COMMENT 'Applicant who made the booking',
-  `team_member_id` int(11) NOT NULL COMMENT 'Team member being booked',
+  `team_member_id` int(11) NULL COMMENT 'Team member assigned by admin (NULL if not yet assigned)',
   `visa_type_id` int(11) NOT NULL COMMENT 'Visa type related to booking',
   `service_type_id` int(11) NOT NULL COMMENT 'Service type being booked',
   `consultation_mode_id` int(11) NOT NULL COMMENT 'Mode of consultation',
-  `booking_date` date NOT NULL,
-  `start_time` time NOT NULL,
-  `end_time` time NOT NULL,
-  `status` enum('pending','confirmed','rescheduled','cancelled','completed','no_show') NOT NULL DEFAULT 'pending',
+  `booking_date` date NULL COMMENT 'To be set by admin during assignment',
+  `start_time` time NULL COMMENT 'To be set by admin during assignment',
+  `end_time` time NULL COMMENT 'To be set by admin during assignment',
+  `duration` int(11) DEFAULT 60 COMMENT 'Duration in minutes',
+  `status` enum('pending_assignment','assigned','confirmed','cancelled','completed','no_show') NOT NULL DEFAULT 'pending_assignment',
+  `payment_status` enum('pending', 'partial', 'paid', 'refunded') NOT NULL DEFAULT 'pending',
   `cancellation_reason` text DEFAULT NULL,
   `cancellation_date` datetime DEFAULT NULL,
   `notes` text DEFAULT NULL COMMENT 'Additional notes from applicant',
+  `admin_notes` text DEFAULT NULL COMMENT 'Notes from admin',
   `team_member_notes` text DEFAULT NULL COMMENT 'Private notes for team member',
+  `price` decimal(10,2) NOT NULL COMMENT 'Price at time of booking',
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
   `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
@@ -530,88 +523,31 @@ CREATE TABLE `bookings` (
   KEY `idx_booking_date` (`booking_date`),
   KEY `idx_booking_status` (`status`),
   CONSTRAINT `booking_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `booking_team_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `booking_team_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE SET NULL,
   CONSTRAINT `booking_visa_type_id_fk` FOREIGN KEY (`visa_type_id`) REFERENCES `visa_types` (`id`) ON DELETE CASCADE,
   CONSTRAINT `booking_service_type_id_fk` FOREIGN KEY (`service_type_id`) REFERENCES `service_types` (`id`) ON DELETE CASCADE,
   CONSTRAINT `booking_mode_id_fk` FOREIGN KEY (`consultation_mode_id`) REFERENCES `consultation_modes` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Additional team members for collaborative bookings
-CREATE TABLE `booking_additional_team_members` (
+-- Booking Assignment History
+CREATE TABLE `booking_assignment_history` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `booking_id` int(11) NOT NULL,
-  `team_member_id` int(11) NOT NULL COMMENT 'Additional team member for the booking',
-  `is_required` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Whether this member must attend',
+  `admin_id` int(11) NOT NULL COMMENT 'Admin who assigned the booking',
+  `team_member_id` int(11) NOT NULL COMMENT 'Team member assigned to',
+  `previous_team_member_id` int(11) DEFAULT NULL COMMENT 'Previous team member if reassigned',
+  `assigned_date` datetime NOT NULL DEFAULT current_timestamp(),
   `notes` text DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
   PRIMARY KEY (`id`),
-  UNIQUE KEY `booking_member_unique` (`booking_id`, `team_member_id`),
-  KEY `idx_additional_booking` (`booking_id`),
-  KEY `idx_additional_member` (`team_member_id`),
-  CONSTRAINT `additional_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `additional_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE CASCADE
+  KEY `idx_assignment_booking` (`booking_id`),
+  KEY `idx_assignment_member` (`team_member_id`),
+  CONSTRAINT `assignment_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `assignment_team_member_id_fk` FOREIGN KEY (`team_member_id`) REFERENCES `team_members` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `assignment_admin_id_fk` FOREIGN KEY (`admin_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `assignment_prev_team_member_id_fk` FOREIGN KEY (`previous_team_member_id`) REFERENCES `team_members` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Booking reschedule history
-CREATE TABLE `booking_reschedule_history` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `booking_id` int(11) NOT NULL,
-  `previous_date` date NOT NULL,
-  `previous_start_time` time NOT NULL,
-  `previous_end_time` time NOT NULL,
-  `new_date` date NOT NULL,
-  `new_start_time` time NOT NULL,
-  `new_end_time` time NOT NULL,
-  `rescheduled_by_user_id` int(11) NOT NULL COMMENT 'User who initiated the reschedule',
-  `rescheduled_by_type` enum('client','team_member','admin') NOT NULL,
-  `reason` text DEFAULT NULL,
-  `rescheduled_at` datetime NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `idx_reschedule_booking` (`booking_id`),
-  KEY `idx_reschedule_user` (`rescheduled_by_user_id`),
-  CONSTRAINT `reschedule_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `reschedule_user_id_fk` FOREIGN KEY (`rescheduled_by_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Booking follow-ups
-CREATE TABLE `booking_follow_ups` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `booking_id` int(11) NOT NULL,
-  `follow_up_date` date NOT NULL,
-  `status` enum('pending','completed','cancelled') NOT NULL DEFAULT 'pending',
-  `notes` text DEFAULT NULL,
-  `created_by` int(11) NOT NULL COMMENT 'User who created the follow-up',
-  `assigned_to` int(11) NOT NULL COMMENT 'Team member assigned to the follow-up',
-  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `idx_followup_booking` (`booking_id`),
-  KEY `idx_followup_date` (`follow_up_date`),
-  KEY `idx_followup_status` (`status`),
-  KEY `idx_followup_assigned` (`assigned_to`),
-  CONSTRAINT `followup_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `followup_created_by_fk` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `followup_assigned_to_fk` FOREIGN KEY (`assigned_to`) REFERENCES `team_members` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Booking activity log
-CREATE TABLE `booking_activity_logs` (
-  `id` int(11) NOT NULL AUTO_INCREMENT,
-  `booking_id` int(11) NOT NULL,
-  `user_id` int(11) NOT NULL COMMENT 'User who performed the action',
-  `activity_type` enum('created','updated','status_changed','rescheduled','cancelled','completed','follow_up_added','team_member_added','team_member_removed','notes_updated') NOT NULL,
-  `description` text NOT NULL,
-  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  PRIMARY KEY (`id`),
-  KEY `idx_activity_booking` (`booking_id`),
-  KEY `idx_activity_user` (`user_id`),
-  KEY `idx_activity_type` (`activity_type`),
-  CONSTRAINT `activity_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `activity_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Booking-related files (documents, presentations, etc.)
+-- Booking Files
 CREATE TABLE `booking_files` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `booking_id` int(11) NOT NULL,
@@ -629,7 +565,25 @@ CREATE TABLE `booking_files` (
   CONSTRAINT `file_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Booking comments and communication
+-- Booking Payment Records
+CREATE TABLE `booking_payments` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `booking_id` int(11) NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `payment_method` varchar(50) NOT NULL,
+  `transaction_reference` varchar(100) DEFAULT NULL,
+  `payment_date` datetime NOT NULL,
+  `notes` text DEFAULT NULL,
+  `created_by` int(11) NOT NULL COMMENT 'User who recorded the payment',
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_payment_booking` (`booking_id`),
+  KEY `idx_payment_date` (`payment_date`),
+  CONSTRAINT `payment_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `payment_created_by_fk` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Booking Comments
 CREATE TABLE `booking_comments` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `booking_id` int(11) NOT NULL,
@@ -637,13 +591,31 @@ CREATE TABLE `booking_comments` (
   `comment` text NOT NULL,
   `is_private` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Whether comment is visible only to team/admin',
   `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  `deleted_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_comment_booking` (`booking_id`),
   KEY `idx_comment_user` (`user_id`),
   CONSTRAINT `comment_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
   CONSTRAINT `comment_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Booking Activity Log
+CREATE TABLE `booking_activity_logs` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `booking_id` int(11) NOT NULL,
+  `user_id` int(11) NOT NULL COMMENT 'User who performed the action',
+  `user_type` enum('admin','team_member','client') NOT NULL DEFAULT 'admin',
+  `activity_type` enum('created','assigned','reassigned','rescheduled','updated','status_changed',
+                       'payment_updated','cancelled','completed','no_show','notes_updated','files_added') NOT NULL,
+  `description` text NOT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `additional_data` JSON DEFAULT NULL COMMENT 'Any additional contextual data for the activity',
+  PRIMARY KEY (`id`),
+  KEY `idx_activity_booking` (`booking_id`),
+  KEY `idx_activity_user` (`user_id`),
+  KEY `idx_activity_type` (`activity_type`),
+  KEY `idx_activity_date` (`created_at`),
+  CONSTRAINT `activity_booking_id_fk` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `activity_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Conversations/threads table

@@ -1,6 +1,17 @@
 <?php
-require_once '../../includes/config.php';
-require_once '../../includes/auth_check.php';
+// Fix database connection include path
+require_once '../../../config/db_connect.php';
+
+// Start session if not already started
+if (session_status() == PHP_SESSION_NONE) {
+    session_start();
+}
+
+// Check if user is logged in as admin
+if (!isset($_SESSION['id']) || !isset($_SESSION['user_type']) || $_SESSION['user_type'] != 'admin') {
+    echo json_encode(['success' => false, 'message' => 'Unauthorized access']);
+    exit;
+}
 
 // Check if it's a POST request
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -67,6 +78,6 @@ if ($stmt->execute()) {
 } else {
     echo json_encode([
         'success' => false,
-        'message' => 'Failed to delete service configuration'
+        'message' => 'Failed to delete service configuration: ' . $stmt->error
     ]);
 }

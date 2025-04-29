@@ -1,7 +1,7 @@
 <?php
 $page_title = "Service Management";
 $page_specific_css = "assets/css/services.css";
-$page_specific_js = "assets/js/services.js";
+// $page_specific_js = "assets/js/services.js";
 require_once 'includes/header.php';
 // require_once 'includes/admin_check.php';
 
@@ -136,200 +136,291 @@ $consultation_modes = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 </div>
 
 <!-- DataTables CSS -->
-<link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
-<!-- DataTables JS -->
+<link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
+<!-- DataTables JS will be loaded AFTER jQuery (in footer) -->
+
+<?php require_once 'includes/footer.php'; ?>
+
+<!-- Load DataTables after jQuery (which is in footer) -->
 <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
 <script src="https://cdn.datatables.net/1.11.5/js/dataTables.bootstrap5.min.js"></script>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Get modal and button references
-    const serviceModal = document.getElementById('service-modal');
-    const addServiceBtn = document.getElementById('add-service-btn');
-    const closeBtn = document.querySelector('.close');
-    const cancelBtn = document.getElementById('cancel-service-btn');
-    const saveServiceBtn = document.getElementById('save-service-btn');
+// Initialize after all resources are loaded
+window.addEventListener('load', function() {
+    console.log('Window loaded, jQuery version:', $.fn.jquery);
+    console.log('DataTable available:', typeof $.fn.DataTable);
     
-    // Function to close modal
-    function closeModal() {
-        serviceModal.style.display = 'none';
-    }
-    
-    // Initialize DataTable
-    if ($.fn.DataTable) {
-        const servicesTable = $('#services-table').DataTable({
-            ajax: {
-                url: 'ajax/get_services.php',
-                dataSrc: ''
-            },
-            columns: [
-                { data: 'country_name' },
-                { data: 'visa_type_name' },
-                { data: 'service_type_name' },
-                { data: 'consultation_mode_name' },
-                { 
-                    data: 'price',
-                    render: function(data) {
-                        return `$${parseFloat(data).toFixed(2)}`;
-                    }
-                },
-                {
-                    data: 'is_active',
-                    render: function(data) {
-                        return data == 1 ? 
-                            '<span class="status-badge active">Active</span>' : 
-                            '<span class="status-badge inactive">Inactive</span>';
-                    }
-                },
-                {
-                    data: null,
-                    render: function(data) {
-                        return `
-                            <button class="btn-small edit-btn" data-id="${data.id}">
-                                <i class="fas fa-edit"></i>
-                            </button>
-                            <button class="btn-small btn-danger delete-btn" data-id="${data.id}">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        `;
-                    }
-                }
-            ],
-            order: [[0, 'asc']],
-            responsive: true
+    // First, check if the visa_service_configurations table exists
+    $.get('ajax/create_service_table.php')
+        .done(function(response) {
+            console.log('Table check:', response);
+            initializeServicePage();
+        })
+        .fail(function(xhr, status, error) {
+            console.error('Table check failed:', status, error);
+            alert('Error initializing service page: ' + error);
         });
-    } else {
-        console.error('DataTable function is not available. Make sure jQuery and DataTables are properly loaded.');
-    }
-    
-    // Show modal when clicking "Add New Service" button
-    addServiceBtn.addEventListener('click', function() {
-        // Reset the form
-        document.getElementById('service-form').reset();
-        document.getElementById('config-id').value = '';
-        document.getElementById('visa-type').disabled = true;
         
-        // Display the modal
-        serviceModal.style.display = 'block';
-    });
-    
-    // Close modal when clicking X button
-    closeBtn.addEventListener('click', closeModal);
-    
-    // Close modal when clicking Cancel button
-    cancelBtn.addEventListener('click', closeModal);
-    
-    // Close modal when clicking outside of it
-    window.addEventListener('click', function(event) {
-        if (event.target === serviceModal) {
-            closeModal();
+    function initializeServicePage() {
+        // Get modal and button references
+        const serviceModal = document.getElementById('service-modal');
+        const addServiceBtn = document.getElementById('add-service-btn');
+        const closeBtn = document.querySelector('.close');
+        const cancelBtn = document.getElementById('cancel-service-btn');
+        const saveServiceBtn = document.getElementById('save-service-btn');
+        
+        // Function to close modal
+        function closeModal() {
+            serviceModal.style.display = 'none';
         }
-    });
-    
-    // Handle country change
-    $('#country').change(function() {
-        const countryId = $(this).val();
-        const visaTypeSelect = $('#visa-type');
         
-        visaTypeSelect.prop('disabled', true).empty()
-            .append('<option value="">Select Visa Type</option>');
-        
-        if (countryId) {
-            $.get('ajax/get_visa_types.php', { country_id: countryId })
-                .done(function(data) {
-                    data.forEach(function(type) {
-                        visaTypeSelect.append(
-                            `<option value="${type.id}">${type.name}</option>`
-                        );
-                    });
-                    visaTypeSelect.prop('disabled', false);
-                });
-        }
-    });
-    
-    // Handle edit button click
-    $(document).on('click', '.edit-btn', function() {
-        const id = $(this).data('id');
-        
-        $.get('ajax/get_service.php', { id: id })
-            .done(function(data) {
-                $('#config-id').val(data.id);
-                $('#country').val(data.country_id).trigger('change');
-                
-                // Wait for visa types to load
-                setTimeout(() => {
-                    $('#visa-type').val(data.visa_type_id);
-                }, 500);
-                
-                $('#service-type').val(data.service_type_id);
-                $('#consultation-mode').val(data.consultation_mode_id);
-                $('#price').val(data.price);
-                $('#is-active').prop('checked', data.is_active == 1);
-                
-                // Show the modal
-                serviceModal.style.display = 'block';
+        // Initialize DataTable with error handling
+        let servicesTable;
+        try {
+            servicesTable = $('#services-table').DataTable({
+                processing: true,
+                ajax: {
+                    url: 'ajax/get_services.php',
+                    dataSrc: function(json) {
+                        console.log('DataTable data received:', json);
+                        return json || [];
+                    },
+                    error: function(xhr, error, thrown) {
+                        console.error('DataTable AJAX error:', error, thrown);
+                    }
+                },
+                columns: [
+                    { data: 'country_name' },
+                    { data: 'visa_type_name' },
+                    { data: 'service_type_name' },
+                    { data: 'consultation_mode_name' },
+                    { 
+                        data: 'price',
+                        render: function(data) {
+                            return `$${parseFloat(data).toFixed(2)}`;
+                        }
+                    },
+                    {
+                        data: 'is_active',
+                        render: function(data) {
+                            return data == 1 ? 
+                                '<span class="status-badge active">Active</span>' : 
+                                '<span class="status-badge inactive">Inactive</span>';
+                        }
+                    },
+                    {
+                        data: null,
+                        render: function(data) {
+                            return `
+                                <button class="btn-small edit-btn" data-id="${data.id}">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button class="btn-small btn-danger delete-btn" data-id="${data.id}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            `;
+                        }
+                    }
+                ],
+                order: [[0, 'asc']],
+                responsive: true
             });
-    });
-    
-    // Handle save button click
-    saveServiceBtn.addEventListener('click', function() {
-        const form = document.getElementById('service-form');
-        
-        if (!form.checkValidity()) {
-            form.reportValidity();
-            return;
+            console.log('DataTable initialized successfully');
+        } catch (e) {
+            console.error('DataTable initialization error:', e.message);
+            // Display error on the page
+            $('#services-table').after('<div class="alert alert-danger">Error initializing table: ' + e.message + '</div>');
         }
         
-        const data = {
-            id: document.getElementById('config-id').value,
-            visa_type_id: document.getElementById('visa-type').value,
-            service_type_id: document.getElementById('service-type').value,
-            consultation_mode_id: document.getElementById('consultation-mode').value,
-            price: document.getElementById('price').value,
-            is_active: document.getElementById('is-active').checked ? 1 : 0
-        };
+        // Show modal when clicking "Add New Service" button
+        addServiceBtn.addEventListener('click', function() {
+            // Reset the form
+            document.getElementById('service-form').reset();
+            document.getElementById('config-id').value = '';
+            document.getElementById('visa-type').disabled = true;
+            
+            // Display the modal
+            serviceModal.style.display = 'block';
+        });
         
-        $.post('ajax/save_service.php', data)
-            .done(function(response) {
-                if (response.success) {
-                    closeModal();
+        // Close modal when clicking X button
+        closeBtn.addEventListener('click', closeModal);
+        
+        // Close modal when clicking Cancel button
+        cancelBtn.addEventListener('click', closeModal);
+        
+        // Close modal when clicking outside of it
+        window.addEventListener('click', function(event) {
+            if (event.target === serviceModal) {
+                closeModal();
+            }
+        });
+        
+        // Handle country change
+        $('#country').change(function() {
+            const countryId = $(this).val();
+            const visaTypeSelect = $('#visa-type');
+            
+            visaTypeSelect.prop('disabled', true).empty()
+                .append('<option value="">Select Visa Type</option>');
+            
+            if (countryId) {
+                $.get('ajax/get_visa_type_services.php', { country_id: countryId })
+                    .done(function(data) {
+                        console.log('Received visa types:', data); // Debug output
+                        
+                        // Fix: Check if data is array or parse it if it's a JSON string
+                        let visaTypes = data;
+                        if (typeof data === 'string') {
+                            try {
+                                visaTypes = JSON.parse(data);
+                            } catch (e) {
+                                console.error('Failed to parse JSON:', e);
+                            }
+                        }
+                        
+                        // Handle both array and object formats
+                        if (Array.isArray(visaTypes)) {
+                            visaTypes.forEach(function(type) {
+                                visaTypeSelect.append(
+                                    `<option value="${type.id}">${type.name}</option>`
+                                );
+                            });
+                            visaTypeSelect.prop('disabled', false);
+                        } else if (visaTypes && typeof visaTypes === 'object') {
+                            // If it's an object with keys like 0, 1, 2...
+                            Object.values(visaTypes).forEach(function(type) {
+                                visaTypeSelect.append(
+                                    `<option value="${type.id}">${type.name}</option>`
+                                );
+                            });
+                            visaTypeSelect.prop('disabled', false);
+                        } else {
+                            console.error('Unexpected response format:', visaTypes);
+                        }
+                    })
+                    .fail(function(xhr, status, error) {
+                        console.error('AJAX request failed:', status, error);
+                        alert('Failed to load visa types. Please try again.');
+                    });
+            }
+        });
+        
+        // Handle edit button click
+        $(document).on('click', '.edit-btn', function() {
+            const id = $(this).data('id');
+            
+            $.get('ajax/get_service.php', { id: id })
+                .done(function(data) {
+                    $('#config-id').val(data.id);
+                    $('#country').val(data.country_id).trigger('change');
                     
-                    if ($.fn.DataTable && $.fn.DataTable.isDataTable('#services-table')) {
-                        $('#services-table').DataTable().ajax.reload();
+                    // Wait for visa types to load
+                    setTimeout(() => {
+                        $('#visa-type').val(data.visa_type_id);
+                    }, 500);
+                    
+                    $('#service-type').val(data.service_type_id);
+                    $('#consultation-mode').val(data.consultation_mode_id);
+                    $('#price').val(data.price);
+                    $('#is-active').prop('checked', data.is_active == 1);
+                    
+                    // Show the modal
+                    serviceModal.style.display = 'block';
+                });
+        });
+        
+        // Handle save button click
+        saveServiceBtn.addEventListener('click', function() {
+            const form = document.getElementById('service-form');
+            
+            if (!form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            
+            const data = {
+                id: document.getElementById('config-id').value,
+                visa_type_id: document.getElementById('visa-type').value,
+                service_type_id: document.getElementById('service-type').value,
+                consultation_mode_id: document.getElementById('consultation-mode').value,
+                price: document.getElementById('price').value,
+                is_active: document.getElementById('is-active').checked ? 1 : 0
+            };
+            
+            // Debug log data being sent
+            console.log('Sending data:', data);
+            
+            $.post('ajax/save_service.php', data)
+                .done(function(response) {
+                    console.log('Save response:', response);
+                    
+                    // Parse the response if it's a string
+                    if (typeof response === 'string') {
+                        try {
+                            response = JSON.parse(response);
+                        } catch (e) {
+                            console.error('Failed to parse response:', e);
+                        }
                     }
                     
-                    alert('Service configuration saved successfully');
-                } else {
-                    alert(response.message || 'Failed to save service configuration');
-                }
-            })
-            .fail(function() {
-                alert('An error occurred while saving');
-            });
-    });
-    
-    // Handle delete button click
-    $(document).on('click', '.delete-btn', function() {
-        const id = $(this).data('id');
-        
-        if (confirm('Are you sure you want to delete this service configuration?')) {
-            $.post('ajax/delete_service.php', { id: id })
-                .done(function(response) {
                     if (response.success) {
-                        if ($.fn.DataTable && $.fn.DataTable.isDataTable('#services-table')) {
-                            $('#services-table').DataTable().ajax.reload();
+                        closeModal();
+                        
+                        // Explicitly reload the DataTable
+                        if (servicesTable) {
+                            servicesTable.ajax.reload();
+                            console.log('DataTable reloaded');
+                        } else {
+                            console.error('DataTable object not available for reload');
+                            location.reload(); // Fallback to page reload
                         }
-                        alert('Service configuration deleted successfully');
+                        
+                        alert(response.message || 'Service configuration saved successfully');
                     } else {
-                        alert(response.message || 'Failed to delete service configuration');
+                        alert(response.message || 'Failed to save service configuration');
                     }
                 })
-                .fail(function() {
-                    alert('An error occurred while deleting');
+                .fail(function(xhr, status, error) {
+                    console.error('AJAX save failed:', status, error);
+                    alert('An error occurred while saving: ' + error);
                 });
-        }
-    });
+        });
+        
+        // Handle delete button click
+        $(document).on('click', '.delete-btn', function() {
+            const id = $(this).data('id');
+            
+            if (confirm('Are you sure you want to delete this service configuration?')) {
+                $.post('ajax/delete_service.php', { id: id })
+                    .done(function(response) {
+                        // Parse the response if it's a string
+                        if (typeof response === 'string') {
+                            try {
+                                response = JSON.parse(response);
+                            } catch (e) {
+                                console.error('Failed to parse response:', e);
+                            }
+                        }
+                        
+                        if (response.success) {
+                            if (servicesTable) {
+                                servicesTable.ajax.reload();
+                            } else {
+                                location.reload(); // Fallback
+                            }
+                            alert(response.message || 'Service configuration deleted successfully');
+                        } else {
+                            alert(response.message || 'Failed to delete service configuration');
+                        }
+                    })
+                    .fail(function(xhr, status, error) {
+                        console.error('AJAX delete failed:', status, error);
+                        alert('An error occurred while deleting: ' + error);
+                    });
+            }
+        });
+    }
 });
 </script>
-
-<?php require_once 'includes/footer.php'; ?>

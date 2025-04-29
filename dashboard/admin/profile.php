@@ -25,9 +25,9 @@ if (!empty($user['profile_picture'])) {
 
 <div class="content">
     <div class="profile-container">
-        <div class="row">
-            <div class="col-lg-4">
-                <div class="card profile-card">
+        <div class="profile-grid">
+            <div class="profile-sidebar">
+                <div class="card">
                     <div class="card-body text-center">
                         <div class="profile-image-container">
                             <img src="<?php echo $profile_img; ?>" alt="Profile" class="profile-image" id="profile-image">
@@ -37,24 +37,24 @@ if (!empty($user['profile_picture'])) {
                             </div>
                         </div>
                         
-                        <h3 class="mt-3"><?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?></h3>
-                        <span class="badge bg-primary text-capitalize"><?php echo htmlspecialchars($user['user_type']); ?></span>
+                        <h3 class="profile-name"><?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?></h3>
+                        <span class="user-type-badge"><?php echo htmlspecialchars($user['user_type']); ?></span>
                         
-                        <div class="mt-3">
-                            <p><i class="fas fa-envelope me-2"></i><?php echo htmlspecialchars($user['email']); ?></p>
-                            <p><i class="fas fa-calendar-alt me-2"></i>Joined <?php echo date('F Y', strtotime($user['created_at'])); ?></p>
+                        <div class="profile-info">
+                            <p><i class="fas fa-envelope info-icon"></i><?php echo htmlspecialchars($user['email']); ?></p>
+                            <p><i class="fas fa-calendar-alt info-icon"></i>Joined <?php echo date('F Y', strtotime($user['created_at'])); ?></p>
                         </div>
                         
-                        <div class="mt-4">
-                            <button id="upload-photo-btn" class="btn btn-outline-primary">
-                                <i class="fas fa-upload me-2"></i>Upload Photo
+                        <div class="upload-section">
+                            <button id="upload-photo-btn" class="button button-outline">
+                                <i class="fas fa-upload icon-left"></i>Upload Photo
                             </button>
-                            <input type="file" id="photo-upload" accept="image/*" style="display: none;">
+                            <input type="file" id="photo-upload" accept="image/*" class="hidden-input">
                         </div>
                     </div>
                 </div>
                 
-                <div class="card mt-4">
+                <div class="card account-info-card">
                     <div class="card-header">
                         <h5>Account Information</h5>
                     </div>
@@ -62,7 +62,7 @@ if (!empty($user['profile_picture'])) {
                         <div class="info-item">
                             <div class="info-label">Status</div>
                             <div class="info-value">
-                                <span class="badge <?php echo $user['status'] == 'active' ? 'bg-success' : 'bg-danger'; ?>">
+                                <span class="status-badge <?php echo $user['status'] == 'active' ? 'status-active' : 'status-inactive'; ?>">
                                     <?php echo ucfirst($user['status']); ?>
                                 </span>
                             </div>
@@ -71,7 +71,7 @@ if (!empty($user['profile_picture'])) {
                         <div class="info-item">
                             <div class="info-label">Email Verification</div>
                             <div class="info-value">
-                                <span class="badge <?php echo $user['email_verified'] ? 'bg-success' : 'bg-warning'; ?>">
+                                <span class="status-badge <?php echo $user['email_verified'] ? 'status-verified' : 'status-unverified'; ?>">
                                     <?php echo $user['email_verified'] ? 'Verified' : 'Unverified'; ?>
                                 </span>
                             </div>
@@ -81,9 +81,9 @@ if (!empty($user['profile_picture'])) {
                             <div class="info-label">Authentication Method</div>
                             <div class="info-value">
                                 <?php if ($user['auth_provider'] == 'google'): ?>
-                                    <i class="fab fa-google me-1"></i> Google
+                                    <i class="fab fa-google icon-left"></i> Google
                                 <?php else: ?>
-                                    <i class="fas fa-key me-1"></i> Local
+                                    <i class="fas fa-key icon-left"></i> Local
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -98,34 +98,34 @@ if (!empty($user['profile_picture'])) {
                 </div>
             </div>
             
-            <div class="col-lg-8">
+            <div class="profile-main">
                 <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="card-header">
                         <h5>Personal Information</h5>
-                        <button id="edit-profile-btn" class="btn btn-sm btn-primary">
-                            <i class="fas fa-edit me-1"></i> Edit Profile
+                        <button id="edit-profile-btn" class="button button-small">
+                            <i class="fas fa-edit icon-left"></i> Edit Profile
                         </button>
                     </div>
                     <div class="card-body">
                         <form id="profile-form">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
+                            <div class="form-row">
+                                <div class="form-column">
                                     <label for="first-name" class="form-label">First Name</label>
-                                    <input type="text" class="form-control" id="first-name" name="first_name" 
+                                    <input type="text" class="form-input" id="first-name" name="first_name" 
                                         value="<?php echo htmlspecialchars($user['first_name']); ?>" readonly>
                                 </div>
-                                <div class="col-md-6">
+                                <div class="form-column">
                                     <label for="last-name" class="form-label">Last Name</label>
-                                    <input type="text" class="form-control" id="last-name" name="last_name" 
+                                    <input type="text" class="form-input" id="last-name" name="last_name" 
                                         value="<?php echo htmlspecialchars($user['last_name']); ?>" readonly>
                                 </div>
                             </div>
                             
-                            <div class="mb-3">
+                            <div class="form-group">
                                 <label for="email" class="form-label">Email Address</label>
-                                <input type="email" class="form-control" id="email" name="email" 
+                                <input type="email" class="form-input" id="email" name="email" 
                                     value="<?php echo htmlspecialchars($user['email']); ?>" readonly>
-                                <div class="form-text">
+                                <div class="form-help">
                                     <?php if (!$user['email_verified']): ?>
                                         <span class="text-warning">Your email is not verified. 
                                             <a href="#" id="resend-verification">Resend verification email</a>
@@ -134,39 +134,37 @@ if (!empty($user['profile_picture'])) {
                                 </div>
                             </div>
                             
-                            <div class="row mt-4">
-                                <div class="col">
-                                    <button type="submit" id="save-profile-btn" class="btn btn-success" style="display: none;">
-                                        <i class="fas fa-save me-1"></i> Save Changes
-                                    </button>
-                                    <button type="button" id="cancel-edit-btn" class="btn btn-outline-secondary ms-2" style="display: none;">
-                                        Cancel
-                                    </button>
-                                </div>
+                            <div class="form-actions">
+                                <button type="submit" id="save-profile-btn" class="button button-success hidden">
+                                    <i class="fas fa-save icon-left"></i> Save Changes
+                                </button>
+                                <button type="button" id="cancel-edit-btn" class="button button-outline hidden">
+                                    Cancel
+                                </button>
                             </div>
                         </form>
                     </div>
                 </div>
                 
-                <div class="card mt-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="card security-card">
+                    <div class="card-header">
                         <h5>Security Settings</h5>
                     </div>
                     <div class="card-body">
                         <form id="password-form">
-                            <div class="mb-3">
+                            <div class="form-group">
                                 <label for="current-password" class="form-label">Current Password</label>
-                                <input type="password" class="form-control" id="current-password" name="current_password">
+                                <input type="password" class="form-input" id="current-password" name="current_password">
                             </div>
                             
-                            <div class="row mb-3">
-                                <div class="col-md-6">
+                            <div class="form-row">
+                                <div class="form-column">
                                     <label for="new-password" class="form-label">New Password</label>
-                                    <input type="password" class="form-control" id="new-password" name="new_password">
+                                    <input type="password" class="form-input" id="new-password" name="new_password">
                                 </div>
-                                <div class="col-md-6">
+                                <div class="form-column">
                                     <label for="confirm-password" class="form-label">Confirm New Password</label>
-                                    <input type="password" class="form-control" id="confirm-password" name="confirm_password">
+                                    <input type="password" class="form-input" id="confirm-password" name="confirm_password">
                                 </div>
                             </div>
                             
@@ -177,14 +175,14 @@ if (!empty($user['profile_picture'])) {
                                 <div class="strength-text" id="strength-text">Password strength</div>
                             </div>
                             
-                            <button type="submit" class="btn btn-primary mt-3">
-                                <i class="fas fa-lock me-1"></i> Change Password
+                            <button type="submit" class="button">
+                                <i class="fas fa-lock icon-left"></i> Change Password
                             </button>
                         </form>
                     </div>
                 </div>
                 
-                <div class="card mt-4">
+                <div class="card notifications-card">
                     <div class="card-header">
                         <h5>Notification Preferences</h5>
                     </div>
@@ -221,27 +219,27 @@ if (!empty($user['profile_picture'])) {
                             <div class="notification-preference">
                                 <div class="preference-name"><?php echo $name; ?></div>
                                 <div class="preference-options">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="email-<?php echo $type; ?>" 
+                                    <div class="toggle-option">
+                                        <input class="toggle-checkbox" type="checkbox" id="email-<?php echo $type; ?>" 
                                             name="notifications[<?php echo $type; ?>][email]" <?php echo $prefs['email_enabled'] ? 'checked' : ''; ?>>
-                                        <label class="form-check-label" for="email-<?php echo $type; ?>">Email</label>
+                                        <label class="toggle-label" for="email-<?php echo $type; ?>">Email</label>
                                     </div>
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="push-<?php echo $type; ?>" 
+                                    <div class="toggle-option">
+                                        <input class="toggle-checkbox" type="checkbox" id="push-<?php echo $type; ?>" 
                                             name="notifications[<?php echo $type; ?>][push]" <?php echo $prefs['push_enabled'] ? 'checked' : ''; ?>>
-                                        <label class="form-check-label" for="push-<?php echo $type; ?>">Push</label>
+                                        <label class="toggle-label" for="push-<?php echo $type; ?>">Push</label>
                                     </div>
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" id="inapp-<?php echo $type; ?>" 
+                                    <div class="toggle-option">
+                                        <input class="toggle-checkbox" type="checkbox" id="inapp-<?php echo $type; ?>" 
                                             name="notifications[<?php echo $type; ?>][inapp]" <?php echo $prefs['in_app_enabled'] ? 'checked' : ''; ?>>
-                                        <label class="form-check-label" for="inapp-<?php echo $type; ?>">In-App</label>
+                                        <label class="toggle-label" for="inapp-<?php echo $type; ?>">In-App</label>
                                     </div>
                                 </div>
                             </div>
                             <?php endforeach; ?>
                             
-                            <button type="submit" class="btn btn-primary mt-3">
-                                <i class="fas fa-save me-1"></i> Save Preferences
+                            <button type="submit" class="button">
+                                <i class="fas fa-save icon-left"></i> Save Preferences
                             </button>
                         </form>
                     </div>
@@ -252,22 +250,20 @@ if (!empty($user['profile_picture'])) {
 </div>
 
 <!-- Crop Image Modal -->
-<div class="modal fade" id="crop-modal" tabindex="-1" aria-labelledby="cropModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="cropModalLabel">Crop Profile Image</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<div class="modal" id="crop-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h5 class="modal-title">Crop Profile Image</h5>
+            <button type="button" class="close-button">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="img-container">
+                <img id="crop-image" src="" alt="Image to crop">
             </div>
-            <div class="modal-body">
-                <div class="img-container">
-                    <img id="crop-image" src="" alt="Image to crop">
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="crop-btn">Crop & Save</button>
-            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="button button-outline modal-cancel-btn">Cancel</button>
+            <button type="button" class="button" id="crop-btn">Crop & Save</button>
         </div>
     </div>
 </div>

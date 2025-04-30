@@ -41,6 +41,7 @@ CREATE TABLE oauth_tokens (
 CREATE TABLE `team_members` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `user_id` int(11) NOT NULL,
+  `phone` varchar(20) DEFAULT NULL,
   `role` enum('Case Manager', 'Document Creator', 'Career Consultant', 'Business Plan Creator', 'Immigration Assistant', 'Social Media Manager', 'Leads & CRM Manager', 'Custom') NOT NULL,
   `custom_role_name` varchar(100) DEFAULT NULL COMMENT 'Name of custom role if role is set to Custom',
   `permissions` text DEFAULT NULL COMMENT 'JSON string of permissions associated with this role',
@@ -57,6 +58,7 @@ CREATE TABLE `tasks` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `name` varchar(255) NOT NULL,
   `description` text,
+  
   `priority` enum('low','normal','high') NOT NULL DEFAULT 'normal',
   `admin_id` int(11) NOT NULL COMMENT 'The admin who created the task',
   `status` enum('pending','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
@@ -284,14 +286,13 @@ CREATE TABLE `visa_required_documents` (
   CONSTRAINT `required_docs_document_type_id_fk` FOREIGN KEY (`document_type_id`) REFERENCES `document_types` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Applications submitted by users
+
+-- Applications submitted by users (updated to use visa_service_configurations)
 CREATE TABLE `visa_applications` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `reference_number` varchar(50) NOT NULL,
   `user_id` int(11) NOT NULL COMMENT 'The applicant user',
-  `visa_type_id` int(11) NOT NULL COMMENT 'The visa type being applied for',
-  `service_type_id` int(11) NOT NULL COMMENT 'The type of service requested',
-  `consultation_mode_id` int(11) NOT NULL,
+  `service_config_id` int(11) NOT NULL COMMENT 'The service configuration being used',
   `status` enum('draft','submitted','in_review','document_requested','processing','approved','rejected','cancelled') NOT NULL DEFAULT 'draft',
   `assigned_team_member_id` int(11) DEFAULT NULL COMMENT 'Primary team member assigned to this application',
   `applicant_notes` text DEFAULT NULL COMMENT 'Notes from the applicant',
@@ -304,18 +305,13 @@ CREATE TABLE `visa_applications` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `reference_number` (`reference_number`),
   KEY `idx_applications_user` (`user_id`),
-  KEY `idx_applications_visa_type` (`visa_type_id`),
-  KEY `idx_applications_service_type` (`service_type_id`),
-  KEY `idx_applications_mode` (`consultation_mode_id`),
+  KEY `idx_applications_service_config` (`service_config_id`),
   KEY `idx_applications_status` (`status`),
   KEY `idx_applications_assigned_member` (`assigned_team_member_id`),
   CONSTRAINT `applications_user_id_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `applications_visa_type_id_fk` FOREIGN KEY (`visa_type_id`) REFERENCES `visa_types` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `applications_service_type_id_fk` FOREIGN KEY (`service_type_id`) REFERENCES `service_types` (`id`) ON DELETE RESTRICT,
-  CONSTRAINT `applications_mode_id_fk` FOREIGN KEY (`consultation_mode_id`) REFERENCES `consultation_modes` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `applications_service_config_id_fk` FOREIGN KEY (`service_config_id`) REFERENCES `visa_service_configurations` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `applications_assigned_member_fk` FOREIGN KEY (`assigned_team_member_id`) REFERENCES `team_members` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
 -- Additional team members assigned to applications
 CREATE TABLE `application_team_assignments` (
   `id` int(11) NOT NULL AUTO_INCREMENT,

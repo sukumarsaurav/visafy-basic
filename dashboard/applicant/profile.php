@@ -1,5 +1,6 @@
 <?php
 $page_title = "My Profile";
+$page_specific_css = "assets/css/profile.css";
 require_once 'includes/header.php';
 
 // Handle profile update
@@ -83,6 +84,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+$success_message = isset($_SESSION['success_msg']) ? $_SESSION['success_msg'] : '';
+$error_message = !empty($errors) ? implode('<br>', $errors) : '';
+
+// Clear session messages
+if (isset($_SESSION['success_msg'])) unset($_SESSION['success_msg']);
+
 // Get user's applications count
 $app_stmt = $conn->prepare("
     SELECT COUNT(*) as total_applications,
@@ -118,186 +125,288 @@ $activity_stmt->close();
 ?>
 
 <div class="profile-container">
-    <!-- Profile Header -->
+    <?php if ($success_message): ?>
+        <div class="alert alert-success"><?php echo $success_message; ?></div>
+    <?php endif; ?>
+    
+    <?php if ($error_message): ?>
+        <div class="alert alert-danger"><?php echo $error_message; ?></div>
+    <?php endif; ?>
+    
     <div class="profile-header">
-        <div class="profile-cover"></div>
-        <div class="profile-info">
-            <div class="profile-avatar">
-                <img src="<?php echo $profile_img; ?>" alt="Profile Picture">
-                <button class="change-avatar-btn" id="changeAvatarBtn">
-                    <i class="fas fa-camera"></i>
-                </button>
-            </div>
-            <div class="profile-details">
-                <h1><?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?></h1>
-                <p class="profile-email"><?php echo htmlspecialchars($user['email']); ?></p>
-                <div class="profile-badges">
-                    <span class="badge">Applicant</span>
-                    <?php if ($user['email_verified']): ?>
-                        <span class="badge verified"><i class="fas fa-check-circle"></i> Verified</span>
-                    <?php endif; ?>
+        <div class="profile-image-container">
+            <?php if (!empty($user['profile_picture'])): ?>
+                <img src="../../uploads/profile/<?php echo htmlspecialchars($user['profile_picture']); ?>" alt="Profile Image" class="profile-image" id="profile-image">
+            <?php else: ?>
+                <div class="profile-image-placeholder">
+                    <?php echo strtoupper(substr($user['first_name'], 0, 1) . substr($user['last_name'], 0, 1)); ?>
                 </div>
+            <?php endif; ?>
+            <div class="image-overlay" id="image-overlay">
+                <i class="fas fa-camera"></i>
+                <span>Change Photo</span>
+            </div>
+        </div>
+        <div class="profile-info">
+            <h1 class="profile-name"><?php echo htmlspecialchars($user['first_name'] . ' ' . $user['last_name']); ?></h1>
+            <p class="profile-entity-type">admin</p>
+            <div class="verification-status <?php echo $user['email_verified'] ? 'verified' : 'unverified'; ?>">
+                <?php echo $user['email_verified'] ? 'Verified' : 'Unverified'; ?>
             </div>
         </div>
     </div>
-
-    <!-- Profile Content -->
-    <div class="profile-content">
-        <div class="profile-grid">
-            <!-- Profile Update Form -->
-            <div class="profile-section">
-                <div class="section-header">
-                    <h2>Personal Information</h2>
-                    <button class="btn btn-secondary" id="editProfileBtn">
-                        <i class="fas fa-edit"></i> Edit Profile
-                    </button>
+    
+    <div class="profile-tabs">
+        <button class="tab-btn active" data-tab="general">General Information</button>
+        <button class="tab-btn" data-tab="professional">Professional Details</button>
+        <button class="tab-btn" data-tab="security">Security</button>
+    </div>
+    
+    <form method="POST" action="" enctype="multipart/form-data" class="profile-form" id="profile-form">
+        <input type="file" id="photo-upload" name="profile_picture" accept="image/*" class="hidden-input">
+        
+        <div class="tab-content active" id="general-tab">
+            <div class="form-group-row">
+                <div class="form-group">
+                    <label for="first_name">First Name</label>
+                    <input type="text" id="first_name" name="first_name" value="<?php echo htmlspecialchars($user['first_name']); ?>" required>
                 </div>
-
-                <?php if (!empty($errors)): ?>
-                    <div class="alert alert-danger">
-                        <ul>
-                            <?php foreach ($errors as $error): ?>
-                                <li><?php echo htmlspecialchars($error); ?></li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </div>
-                <?php endif; ?>
-
-                <?php if (isset($_SESSION['success_msg'])): ?>
-                    <div class="alert alert-success">
-                        <?php 
-                        echo htmlspecialchars($_SESSION['success_msg']);
-                        unset($_SESSION['success_msg']);
-                        ?>
-                    </div>
-                <?php endif; ?>
-
-                <form id="profileForm" method="POST" enctype="multipart/form-data" class="profile-form">
-                    <div class="form-group">
-                        <label for="first_name">First Name</label>
-                        <input type="text" id="first_name" name="first_name" 
-                               value="<?php echo htmlspecialchars($user['first_name']); ?>" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="last_name">Last Name</label>
-                        <input type="text" id="last_name" name="last_name" 
-                               value="<?php echo htmlspecialchars($user['last_name']); ?>" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="email">Email Address</label>
-                        <input type="email" id="email" name="email" 
-                               value="<?php echo htmlspecialchars($user['email']); ?>" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="profile_picture">Profile Picture</label>
-                        <input type="file" id="profile_picture" name="profile_picture" accept="image/*" class="hidden">
-                        <div class="file-upload-wrapper">
-                            <button type="button" class="btn btn-outline" id="uploadTrigger">
-                                <i class="fas fa-upload"></i> Choose Image
-                            </button>
-                            <span id="fileName">No file chosen</span>
-                        </div>
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">Save Changes</button>
-                        <button type="button" class="btn btn-secondary" id="cancelEdit">Cancel</button>
-                    </div>
-                </form>
-            </div>
-
-            <!-- Statistics Section -->
-            <div class="profile-section">
-                <h2>Overview</h2>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-file-alt"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3><?php echo $applications['total_applications']; ?></h3>
-                            <p>Total Applications</p>
-                        </div>
-                    </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-check-circle"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3><?php echo $applications['approved_applications']; ?></h3>
-                            <p>Approved Applications</p>
-                        </div>
-                    </div>
+                <div class="form-group">
+                    <label for="last_name">Last Name</label>
+                    <input type="text" id="last_name" name="last_name" value="<?php echo htmlspecialchars($user['last_name']); ?>" required>
                 </div>
             </div>
-
-            <!-- Recent Activity -->
-            <div class="profile-section">
-                <h2>Recent Activity</h2>
-                <div class="activity-timeline">
-                    <?php if ($activities->num_rows > 0): ?>
-                        <?php while ($activity = $activities->fetch_assoc()): ?>
-                            <div class="activity-item">
-                                <div class="activity-icon">
-                                    <i class="fas <?php echo $activity['type'] === 'application' ? 'fa-file-alt' : 'fa-upload'; ?>"></i>
-                                </div>
-                                <div class="activity-details">
-                                    <p><?php echo htmlspecialchars($activity['details']); ?></p>
-                                    <span class="activity-time">
-                                        <?php echo date('M d, Y h:i A', strtotime($activity['created_at'])); ?>
-                                    </span>
-                                </div>
-                            </div>
-                        <?php endwhile; ?>
-                    <?php else: ?>
-                        <p class="no-activity">No recent activity</p>
-                    <?php endif; ?>
+            
+            <div class="form-group-row">
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" value="<?php echo htmlspecialchars($user['email']); ?>" disabled>
+                    <small>Email cannot be changed. Contact support for assistance.</small>
+                </div>
+                <div class="form-group">
+                    <label for="phone">Phone Number</label>
+                    <input type="tel" id="phone" name="phone" value="+919991289245">
                 </div>
             </div>
+            
+            <div class="form-group-row">
+                <div class="form-group">
+                    <label for="joined">Joined Date</label>
+                    <input type="text" id="joined" value="April 2025" disabled>
+                </div>
+                <div class="form-group">
+                    <label for="last_updated">Last Updated</label>
+                    <input type="text" id="last_updated" value="Apr 29, 2025" disabled>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="professional-tab">
+            <!-- Professional details tab content -->
+            <div class="form-group">
+                <label for="bio">Bio / Description</label>
+                <textarea id="bio" name="bio" rows="5">Professional details go here.</textarea>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="security-tab">
+            <div class="form-group">
+                <label for="current_password">Current Password</label>
+                <input type="password" id="current_password" name="current_password">
+            </div>
+            
+            <div class="form-group-row">
+                <div class="form-group">
+                    <label for="password">New Password</label>
+                    <input type="password" id="password" name="password" minlength="8">
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">Confirm New Password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" minlength="8">
+                </div>
+            </div>
+            
+            <div class="password-strength">Password strength</div>
+            
+            <div class="security-note">
+                <div class="icon"><i class="fas fa-shield-alt"></i></div>
+                <div class="content">
+                    <h3>Password Security Tips</h3>
+                    <ul>
+                        <li>Use at least 8 characters, including uppercase, lowercase, numbers, and special characters</li>
+                        <li>Don't reuse passwords from other websites</li>
+                        <li>Update your password regularly</li>
+                        <li>Never share your password with others</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="form-actions">
+            <button type="submit" class="save-btn">Save Changes</button>
+            <button type="button" class="cancel-btn" id="cancel-btn">Cancel</button>
+        </div>
+    </form>
+</div>
+
+<!-- Crop Image Modal -->
+<div class="modal" id="crop-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h5 class="modal-title">Crop Profile Image</h5>
+            <button type="button" class="close-button">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="img-container">
+                <img id="crop-image" src="" alt="Image to crop">
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="button button-outline modal-cancel-btn">Cancel</button>
+            <button type="button" class="button" id="crop-btn">Crop & Save</button>
         </div>
     </div>
 </div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('profileForm');
-    const editBtn = document.getElementById('editProfileBtn');
-    const cancelBtn = document.getElementById('cancelEdit');
-    const uploadTrigger = document.getElementById('uploadTrigger');
-    const fileInput = document.getElementById('profile_picture');
-    const fileName = document.getElementById('fileName');
+    // Tab switching functionality
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
     
-    // Enable/disable form fields
-    function toggleForm(enabled) {
-        const inputs = form.querySelectorAll('input');
-        inputs.forEach(input => input.disabled = !enabled);
-        form.classList.toggle('editing', enabled);
+    tabButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            // Remove active class from all buttons and contents
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
+            
+            // Add active class to current button
+            this.classList.add('active');
+            
+            // Show corresponding tab content
+            const tabId = this.getAttribute('data-tab') + '-tab';
+            document.getElementById(tabId).classList.add('active');
+        });
+    });
+    
+    // Profile image change functionality
+    const imageOverlay = document.getElementById('image-overlay');
+    const photoUpload = document.getElementById('photo-upload');
+    const profileImage = document.getElementById('profile-image');
+    const cropModal = document.getElementById('crop-modal');
+    const cropImage = document.getElementById('crop-image');
+    const cropBtn = document.getElementById('crop-btn');
+    const closeButton = document.querySelector('.close-button');
+    const modalCancelBtn = document.querySelector('.modal-cancel-btn');
+    
+    if (imageOverlay && photoUpload) {
+        imageOverlay.addEventListener('click', function() {
+            photoUpload.click();
+        });
+        
+        photoUpload.addEventListener('change', function() {
+            if (this.files && this.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    // In a real implementation, this would show the crop modal
+                    if (cropModal && cropImage) {
+                        cropImage.src = e.target.result;
+                        cropModal.style.display = 'block';
+                    } else {
+                        // Fallback if crop modal not available
+                        if (profileImage) {
+                            profileImage.src = e.target.result;
+                        }
+                    }
+                };
+                reader.readAsDataURL(this.files[0]);
+            }
+        });
     }
     
-    // Initially disable form
-    toggleForm(false);
+    // Crop modal functionality
+    if (closeButton) {
+        closeButton.addEventListener('click', function() {
+            cropModal.style.display = 'none';
+        });
+    }
     
-    editBtn.addEventListener('click', () => toggleForm(true));
-    cancelBtn.addEventListener('click', () => {
-        toggleForm(false);
-        form.reset();
-    });
+    if (modalCancelBtn) {
+        modalCancelBtn.addEventListener('click', function() {
+            cropModal.style.display = 'none';
+        });
+    }
     
-    // Handle file upload
-    uploadTrigger.addEventListener('click', () => fileInput.click());
+    if (cropBtn) {
+        cropBtn.addEventListener('click', function() {
+            // In a real implementation, this would handle cropping
+            cropModal.style.display = 'none';
+            // Update profile image with cropped version
+            if (profileImage && cropImage) {
+                profileImage.src = cropImage.src;
+            }
+        });
+    }
     
-    fileInput.addEventListener('change', function() {
-        if (this.files && this.files[0]) {
-            fileName.textContent = this.files[0].name;
-        } else {
-            fileName.textContent = 'No file chosen';
-        }
-    });
+    // Form cancel button
+    const cancelBtn = document.getElementById('cancel-btn');
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            window.location.reload();
+        });
+    }
+    
+    // Password strength meter functionality
+    const passwordInput = document.getElementById('password');
+    const strengthIndicator = document.getElementById('strength-indicator');
+    const strengthText = document.getElementById('strength-text');
+    
+    if (passwordInput && strengthIndicator && strengthText) {
+        passwordInput.addEventListener('input', function() {
+            const password = this.value;
+            let strength = 0;
+            
+            if (password.length >= 8) strength += 25;
+            if (password.match(/[A-Z]/)) strength += 25;
+            if (password.match(/[0-9]/)) strength += 25;
+            if (password.match(/[^A-Za-z0-9]/)) strength += 25;
+            
+            strengthIndicator.style.width = strength + '%';
+            
+            if (strength < 25) {
+                strengthIndicator.style.backgroundColor = '#ff4d4d'; // Red
+                strengthText.textContent = 'Very Weak';
+            } else if (strength < 50) {
+                strengthIndicator.style.backgroundColor = '#ffa64d'; // Orange
+                strengthText.textContent = 'Weak';
+            } else if (strength < 75) {
+                strengthIndicator.style.backgroundColor = '#ffff4d'; // Yellow
+                strengthText.textContent = 'Medium';
+            } else if (strength < 100) {
+                strengthIndicator.style.backgroundColor = '#4dff4d'; // Light green
+                strengthText.textContent = 'Strong';
+            } else {
+                strengthIndicator.style.backgroundColor = '#1a8cff'; // Blue
+                strengthText.textContent = 'Very Strong';
+            }
+        });
+    }
+    
+    // Password confirmation validation
+    const confirmPassword = document.getElementById('confirm_password');
+    
+    if (passwordInput && confirmPassword) {
+        confirmPassword.addEventListener('input', function() {
+            if (this.value !== passwordInput.value) {
+                this.setCustomValidity('Passwords do not match');
+            } else {
+                this.setCustomValidity('');
+            }
+        });
+    }
 });
 </script>
 
 <?php require_once 'includes/footer.php'; ?>
+

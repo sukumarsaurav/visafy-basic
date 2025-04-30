@@ -197,9 +197,90 @@ document.addEventListener('DOMContentLoaded', function() {
         if (trigger) {
             trigger.addEventListener('click', function() {
                 document.getElementById(modalId).style.display = 'block';
+                
+                // If this is the new conversation modal or add participant modal, load users
+                if (modalId === 'new-conversation-modal' || modalId === 'add-participant-modal') {
+                    loadUsers(modalId);
+                }
             });
         }
     });
+    
+    // Load users for participant selectors
+    function loadUsers(modalId) {
+        const selectElement = modalId === 'new-conversation-modal' ? 
+                             document.getElementById('participants') : 
+                             document.getElementById('new-participants');
+        
+        // Clear existing options
+        selectElement.innerHTML = '<option value="" disabled>Loading users...</option>';
+        
+        fetch('ajax/get_users.php')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Clear the loading option
+                    selectElement.innerHTML = '';
+                    
+                    // Group users by type
+                    const adminUsers = data.users.filter(user => user.user_type === 'admin');
+                    const teamUsers = data.users.filter(user => user.user_type === 'member');
+                    const clientUsers = data.users.filter(user => user.user_type === 'applicant');
+                    
+                    // Add optgroups with their respective users
+                    if (adminUsers.length > 0) {
+                        const adminGroup = document.createElement('optgroup');
+                        adminGroup.label = 'Admins';
+                        adminUsers.forEach(user => {
+                            const option = document.createElement('option');
+                            option.value = user.id;
+                            option.textContent = `${user.name} (${user.email})`;
+                            adminGroup.appendChild(option);
+                        });
+                        selectElement.appendChild(adminGroup);
+                    }
+                    
+                    if (teamUsers.length > 0) {
+                        const teamGroup = document.createElement('optgroup');
+                        teamGroup.label = 'Team Members';
+                        teamUsers.forEach(user => {
+                            const option = document.createElement('option');
+                            option.value = user.id;
+                            option.textContent = `${user.name} (${user.email})`;
+                            teamGroup.appendChild(option);
+                        });
+                        selectElement.appendChild(teamGroup);
+                    }
+                    
+                    if (clientUsers.length > 0) {
+                        const clientGroup = document.createElement('optgroup');
+                        clientGroup.label = 'Clients';
+                        clientUsers.forEach(user => {
+                            const option = document.createElement('option');
+                            option.value = user.id;
+                            option.textContent = `${user.name} (${user.email})`;
+                            clientGroup.appendChild(option);
+                        });
+                        selectElement.appendChild(clientGroup);
+                    }
+                    
+                    // Initialize select2 for better UX if it's included in the project
+                    if (typeof $ !== 'undefined' && $.fn.select2) {
+                        $(selectElement).select2({
+                            placeholder: 'Select users...',
+                            width: '100%'
+                        });
+                    }
+                } else {
+                    selectElement.innerHTML = '<option value="" disabled>Failed to load users</option>';
+                    console.error('Error loading users:', data.error);
+                }
+            })
+            .catch(error => {
+                selectElement.innerHTML = '<option value="" disabled>Failed to load users</option>';
+                console.error('Error fetching users:', error);
+            });
+    }
     
     // Close modals
     const closeButtons = document.querySelectorAll('.modal .close, .close-modal-btn');
@@ -253,7 +334,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const relatedIdSelect = document.getElementById('related-id');
         relatedIdSelect.innerHTML = '<option value="">-- Select --</option>';
         
-        // This would be replaced with an actual AJAX call to get items
         fetch(`ajax/get_related_items.php?type=${type}`)
             .then(response => response.json())
             .then(data => {
@@ -264,11 +344,115 @@ document.addEventListener('DOMContentLoaded', function() {
                         option.textContent = item.name;
                         relatedIdSelect.appendChild(option);
                     });
+                } else {
+                    console.error('Error loading related items:', data.error);
                 }
             })
             .catch(error => {
                 console.error('Error loading related items:', error);
             });
+    }
+    
+    // Form submission handlers
+    const newConversationForm = document.getElementById('new-conversation-form');
+    if (newConversationForm) {
+        newConversationForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Show loading state
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalBtnText = submitBtn.innerHTML;
+            submitBtn.innerHTML = 'Creating...';
+            submitBtn.disabled = true;
+            
+            // Gather form data
+            const formData = new FormData(this);
+            
+            // Send AJAX request
+            fetch('ajax/create_conversation.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Reset button
+                submitBtn.innerHTML = originalBtnText;
+                submitBtn.disabled = false;
+                
+                if (data.success) {
+                    // Close modal
+                    document.getElementById('new-conversation-modal').style.display = 'none';
+                    
+                    // Reset form
+                    newConversationForm.reset();
+                    
+                    // Redirect to the conversation
+                    window.location.href = `messages.php?conversation_id=${data.conversation_id}`;
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                // Reset button
+                submitBtn.innerHTML = originalBtnText;
+                submitBtn.disabled = false;
+                
+                console.error('Error creating conversation:', error);
+                alert('An error occurred while creating the conversation. Please try again.');
+            });
+        });
+    }
+    
+    // Add participant form submission
+    const addParticipantForm = document.getElementById('add-participant-form');
+    if (addParticipantForm) {
+        addParticipantForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            // Show loading state
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalBtnText = submitBtn.innerHTML;
+            submitBtn.innerHTML = 'Adding...';
+            submitBtn.disabled = true;
+            
+            // Gather form data
+            const formData = new FormData(this);
+            
+            // Send AJAX request
+            fetch('ajax/add_conversation_participants.php', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Reset button
+                submitBtn.innerHTML = originalBtnText;
+                submitBtn.disabled = false;
+                
+                if (data.success) {
+                    // Close modal
+                    document.getElementById('add-participant-modal').style.display = 'none';
+                    
+                    // Reset form
+                    addParticipantForm.reset();
+                    
+                    // Refresh participant list or entire conversation view
+                    // You might want to implement this part based on your app's structure
+                    alert('Participants added successfully!');
+                    location.reload(); // Simple refresh for now
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            })
+            .catch(error => {
+                // Reset button
+                submitBtn.innerHTML = originalBtnText;
+                submitBtn.disabled = false;
+                
+                console.error('Error adding participants:', error);
+                alert('An error occurred while adding participants. Please try again.');
+            });
+        });
     }
 });
 </script>

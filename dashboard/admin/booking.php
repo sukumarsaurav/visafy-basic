@@ -1,63 +1,40 @@
 <?php
 // Set page variables
-$page_title = "Booking Management";
-$page_specific_css = "assets/css/bookings.css";
+$page_title = "Manage Bookings";
 $page_header = "Booking Management";
 
 // Include header (handles session and authentication)
 require_once 'includes/header.php';
 
-// Check if user is admin
-if (!isset($_SESSION['user_type']) || $_SESSION['user_type'] !== 'admin') {
-    echo "<div class='error-message'>Access denied. Only admin users can access this page.</div>";
+// Get entity_id and type from database
+$stmt = $conn->prepare("SELECT id, entity_type FROM professional_entities WHERE user_id = ?");
+$stmt->bind_param("i", $_SESSION['user_id']);
+$stmt->execute();
+$result = $stmt->get_result();
+if ($result->num_rows === 0) {
+    echo "<div class='alert alert-danger'>Professional profile not found. Please complete your profile first.</div>";
     require_once 'includes/footer.php';
     exit;
 }
+$entity = $result->fetch_assoc();
+$entity_id = $entity['id'];
+$entity_type = $entity['entity_type'];
 
-// Make sure user_id is set
-if (!isset($_SESSION['id'])) {
-    echo "<div class='error-message'>Session error. Please log in again.</div>";
-    require_once 'includes/footer.php';
-    exit;
-}
-
-$user_id = $_SESSION['id'];
-$user_type = $_SESSION['user_type'];
-
-// Get team members if admin
-$team_members = [];
+// If company, get company details
+$company_id = null;
 $max_concurrent_bookings = 1;
-
-if ($user_type === 'admin') {
-    // Get team members for this admin
-    $team_sql = "SELECT id, user_id, role, custom_role_name FROM team_members WHERE deleted_at IS NULL";
-    $stmt = $conn->prepare($team_sql);
+if ($entity_type === 'company') {
+    $stmt = $conn->prepare("SELECT cp.id, COALESCE(cbc.max_concurrent_bookings, 1) as max_bookings 
+                           FROM company_professionals cp 
+                           LEFT JOIN company_booking_capacity cbc ON cp.id = cbc.company_id 
+                           WHERE cp.entity_id = ?");
+    $stmt->bind_param("i", $entity_id);
     $stmt->execute();
-    $team_members = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    
-    // Create admin_booking_settings table if it doesn't exist
-    $create_table_sql = "CREATE TABLE IF NOT EXISTS `admin_booking_settings` (
-        `id` int(11) NOT NULL AUTO_INCREMENT,
-        `user_id` int(11) NOT NULL,
-        `max_concurrent_bookings` int(11) NOT NULL DEFAULT 1,
-        `created_at` datetime NOT NULL DEFAULT current_timestamp(),
-        `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `user_id` (`user_id`),
-        FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;";
-    
-    $conn->query($create_table_sql);
-    
-    // Get booking capacity setting
-    $capacity_sql = "SELECT COALESCE(max_concurrent_bookings, 1) as max_bookings FROM admin_booking_settings WHERE user_id = ?";
-    $stmt = $conn->prepare($capacity_sql);
-    $stmt->bind_param("i", $user_id);
-    $stmt->execute();
-    $capacity_result = $stmt->get_result();
-    if ($capacity_result->num_rows > 0) {
-        $capacity_data = $capacity_result->fetch_assoc();
-        $max_concurrent_bookings = $capacity_data['max_bookings'];
+    $company_result = $stmt->get_result();
+    if ($company_result->num_rows > 0) {
+        $company_data = $company_result->fetch_assoc();
+        $company_id = $company_data['id'];
+        $max_concurrent_bookings = $company_data['max_bookings'];
     }
 }
 
@@ -65,25 +42,23 @@ if ($user_type === 'admin') {
 $success_message = "";
 $error_message = "";
 
-// Rest of the code remains the same...
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Process different form actions
     if (isset($_POST['action'])) {
         switch ($_POST['action']) {
             case 'update_capacity':
-                if ($user_type === 'admin' && isset($_POST['max_concurrent_bookings']) && is_numeric($_POST['max_concurrent_bookings'])) {
+                if ($entity_type === 'company' && isset($_POST['max_concurrent_bookings']) && is_numeric($_POST['max_concurrent_bookings'])) {
                     $max_bookings = max(1, intval($_POST['max_concurrent_bookings']));
                     
                     // Check if capacity setting exists
-                    $check_stmt = $conn->prepare("SELECT id FROM admin_booking_settings WHERE user_id = ?");
-                    $check_stmt->bind_param("i", $user_id);
+                    $check_stmt = $conn->prepare("SELECT id FROM company_booking_capacity WHERE company_id = ?");
+                    $check_stmt->bind_param("i", $company_id);
                     $check_stmt->execute();
                     
                     if ($check_stmt->get_result()->num_rows > 0) {
                         // Update existing
-                        $update_stmt = $conn->prepare("UPDATE admin_booking_settings SET max_concurrent_bookings = ? WHERE user_id = ?");
-                        $update_stmt->bind_param("ii", $max_bookings, $user_id);
+                        $update_stmt = $conn->prepare("UPDATE company_booking_capacity SET max_concurrent_bookings = ? WHERE company_id = ?");
+                        $update_stmt->bind_param("ii", $max_bookings, $company_id);
                         if ($update_stmt->execute()) {
                             $success_message = "Booking capacity updated successfully!";
                             $max_concurrent_bookings = $max_bookings;
@@ -92,8 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     } else {
                         // Insert new
-                        $insert_stmt = $conn->prepare("INSERT INTO admin_booking_settings (user_id, max_concurrent_bookings) VALUES (?, ?)");
-                        $insert_stmt->bind_param("ii", $user_id, $max_bookings);
+                        $insert_stmt = $conn->prepare("INSERT INTO company_booking_capacity (company_id, max_concurrent_bookings) VALUES (?, ?)");
+                        $insert_stmt->bind_param("ii", $company_id, $max_bookings);
                         if ($insert_stmt->execute()) {
                             $success_message = "Booking capacity set successfully!";
                             $max_concurrent_bookings = $max_bookings;
@@ -121,11 +96,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     // Check for overlapping timeslots
                     $check_stmt = $conn->prepare("SELECT id FROM timeslot_configurations 
-                                                 WHERE user_id = ? AND day_of_week = ? AND 
+                                                 WHERE entity_id = ? AND day_of_week = ? AND 
                                                  ((start_time <= ? AND end_time > ?) OR 
                                                  (start_time < ? AND end_time >= ?) OR 
                                                  (start_time >= ? AND end_time <= ?))");
-                    $check_stmt->bind_param("iissssss", $user_id, $day_of_week, $end_time, $start_time, $end_time, $start_time, $start_time, $end_time);
+                    $check_stmt->bind_param("iissssss", $entity_id, $day_of_week, $end_time, $start_time, $end_time, $start_time, $start_time, $end_time);
                     $check_stmt->execute();
                     if ($check_stmt->get_result()->num_rows > 0) {
                         $error_message = "This timeslot overlaps with an existing timeslot for this day.";
@@ -134,9 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     // Insert new timeslot
                     $stmt = $conn->prepare("INSERT INTO timeslot_configurations 
-                                          (user_id, day_of_week, start_time, end_time, is_available, slot_duration, buffer_time) 
+                                          (entity_id, day_of_week, start_time, end_time, is_available, slot_duration, buffer_time) 
                                           VALUES (?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->bind_param("iissiii", $user_id, $day_of_week, $start_time, $end_time, $is_available, $slot_duration, $buffer_time);
+                    $stmt->bind_param("iissiii", $entity_id, $day_of_week, $start_time, $end_time, $is_available, $slot_duration, $buffer_time);
                     
                     if ($stmt->execute()) {
                         $success_message = "Timeslot added successfully!";
@@ -150,9 +125,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (isset($_POST['timeslot_id']) && is_numeric($_POST['timeslot_id'])) {
                     $timeslot_id = intval($_POST['timeslot_id']);
                     
-                    // Verify timeslot belongs to this user
-                    $check_stmt = $conn->prepare("SELECT id FROM timeslot_configurations WHERE id = ? AND user_id = ?");
-                    $check_stmt->bind_param("ii", $timeslot_id, $user_id);
+                    // Verify timeslot belongs to this professional
+                    $check_stmt = $conn->prepare("SELECT id FROM timeslot_configurations WHERE id = ? AND entity_id = ?");
+                    $check_stmt->bind_param("ii", $timeslot_id, $entity_id);
                     $check_stmt->execute();
                     if ($check_stmt->get_result()->num_rows === 0) {
                         $error_message = "Timeslot not found or you don't have permission to delete it.";
@@ -184,14 +159,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     // Check if override exists
-                    $check_stmt = $conn->prepare("SELECT id FROM availability_overrides WHERE user_id = ? AND date = ?");
-                    $check_stmt->bind_param("is", $user_id, $override_date);
+                    $check_stmt = $conn->prepare("SELECT id FROM availability_overrides WHERE entity_id = ? AND date = ?");
+                    $check_stmt->bind_param("is", $entity_id, $override_date);
                     $check_stmt->execute();
                     
                     if ($check_stmt->get_result()->num_rows > 0) {
                         // Update existing
-                        $update_stmt = $conn->prepare("UPDATE availability_overrides SET is_available = ?, reason = ? WHERE user_id = ? AND date = ?");
-                        $update_stmt->bind_param("issi", $is_available, $reason, $user_id, $override_date);
+                        $update_stmt = $conn->prepare("UPDATE availability_overrides SET is_available = ?, reason = ? WHERE entity_id = ? AND date = ?");
+                        $update_stmt->bind_param("issi", $is_available, $reason, $entity_id, $override_date);
                         if ($update_stmt->execute()) {
                             $success_message = "Date availability updated successfully!";
                         } else {
@@ -199,8 +174,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     } else {
                         // Insert new
-                        $insert_stmt = $conn->prepare("INSERT INTO availability_overrides (user_id, date, is_available, reason) VALUES (?, ?, ?, ?)");
-                        $insert_stmt->bind_param("isis", $user_id, $override_date, $is_available, $reason);
+                        $insert_stmt = $conn->prepare("INSERT INTO availability_overrides (entity_id, date, is_available, reason) VALUES (?, ?, ?, ?)");
+                        $insert_stmt->bind_param("isis", $entity_id, $override_date, $is_available, $reason);
                         if ($insert_stmt->execute()) {
                             $success_message = "Date availability set successfully!";
                         } else {
@@ -216,9 +191,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $status = $_POST['status'];
                     $notes = trim($_POST['notes'] ?? '');
                     
-                    // Verify booking belongs to this user
-                    $check_stmt = $conn->prepare("SELECT id FROM bookings WHERE id = ? AND admin_id = ?");
-                    $check_stmt->bind_param("ii", $booking_id, $user_id);
+                    // Verify booking belongs to this professional
+                    $check_stmt = $conn->prepare("SELECT id FROM bookings WHERE id = ? AND entity_id = ?");
+                    $check_stmt->bind_param("ii", $booking_id, $entity_id);
                     $check_stmt->execute();
                     if ($check_stmt->get_result()->num_rows === 0) {
                         $error_message = "Booking not found or you don't have permission to update it.";
@@ -226,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                     // Update booking status
-                    $stmt = $conn->prepare("UPDATE bookings SET status = ?, admin_notes = ? WHERE id = ?");
+                    $stmt = $conn->prepare("UPDATE bookings SET status = ?, professional_notes = ? WHERE id = ?");
                     $stmt->bind_param("ssi", $status, $notes, $booking_id);
                     if ($stmt->execute()) {
                         // If cancelled, update cancellation info
@@ -246,82 +221,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Get timeslot configurations
-$timeslots_sql = "SELECT * FROM timeslot_configurations WHERE user_id = ? ORDER BY day_of_week, start_time";
+$timeslots_sql = "SELECT * FROM timeslot_configurations WHERE entity_id = ? ORDER BY day_of_week, start_time";
 $stmt = $conn->prepare($timeslots_sql);
-$stmt->bind_param("i", $user_id);
+$stmt->bind_param("i", $entity_id);
 $stmt->execute();
 $timeslots = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Fetch upcoming bookings
-$upcoming_bookings_sql = "
+// Get upcoming bookings
+$current_datetime = date('Y-m-d H:i:s');
+$bookings_sql = "
     SELECT b.*, 
            u.email as user_email,
-           vt.name as visa_type_name,
-           c.name as country_name,
-           st.name as service_type_name,
-           cm.name as consultation_mode_name
+           pvs.name as service_name,
+           c.name as consultation_mode
     FROM bookings b
     JOIN users u ON b.user_id = u.id
-    JOIN visa_types vt ON b.visa_type_id = vt.id
-    JOIN countries c ON vt.country_id = c.id 
-    JOIN service_types st ON b.service_type_id = st.id
-    JOIN consultation_modes cm ON b.consultation_mode_id = cm.id
-    WHERE b.booking_date >= CURDATE()
-    AND (b.team_member_id IN (SELECT id FROM team_members WHERE user_id = ?) OR b.created_by = ?)
+    JOIN professional_visa_services pvs ON b.service_id = pvs.id
+    JOIN consultation_modes c ON b.consultation_mode_id = c.id
+    WHERE b.entity_id = ? 
+    AND ((b.booking_date > CURDATE()) OR (b.booking_date = CURDATE() AND b.start_time >= CURTIME()))
+    AND b.status NOT IN ('cancelled', 'completed', 'no_show')
     ORDER BY b.booking_date, b.start_time
     LIMIT 20
 ";
-$stmt = $conn->prepare($upcoming_bookings_sql);
-$stmt->bind_param("ii", $user_id, $user_id);
+$stmt = $conn->prepare($bookings_sql);
+$stmt->bind_param("i", $entity_id);
 $stmt->execute();
-$result = $stmt->get_result();
-$upcoming_bookings = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+$upcoming_bookings = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
 // Get date overrides for the next 30 days
 $date_overrides_sql = "
     SELECT * FROM availability_overrides 
-    WHERE user_id = ? AND date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+    WHERE entity_id = ? AND date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
     ORDER BY date
 ";
 $stmt = $conn->prepare($date_overrides_sql);
-$stmt->bind_param("i", $user_id);
+$stmt->bind_param("i", $entity_id);
 $stmt->execute();
 $date_overrides = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
-// Fetch past bookings
+// Get past bookings
 $past_bookings_sql = "
     SELECT b.*, 
            u.email as user_email,
-           vt.name as visa_type_name,
-           c.name as country_name,
-           st.name as service_type_name,
-           cm.name as consultation_mode_name
+           pvs.name as service_name,
+           c.name as consultation_mode
     FROM bookings b
     JOIN users u ON b.user_id = u.id
-    JOIN visa_types vt ON b.visa_type_id = vt.id
-    JOIN countries c ON vt.country_id = c.id 
-    JOIN service_types st ON b.service_type_id = st.id
-    JOIN consultation_modes cm ON b.consultation_mode_id = cm.id
-    WHERE b.booking_date < CURDATE()
-    AND (b.team_member_id IN (SELECT id FROM team_members WHERE user_id = ?) OR b.created_by = ?)
+    JOIN professional_visa_services pvs ON b.service_id = pvs.id
+    JOIN consultation_modes c ON b.consultation_mode_id = c.id
+    WHERE b.entity_id = ? 
+    AND ((b.booking_date < CURDATE()) OR (b.booking_date = CURDATE() AND b.start_time < CURTIME()) OR b.status IN ('cancelled', 'completed', 'no_show'))
     ORDER BY b.booking_date DESC, b.start_time DESC
     LIMIT 10
 ";
 $stmt = $conn->prepare($past_bookings_sql);
-$stmt->bind_param("ii", $user_id, $user_id);
+$stmt->bind_param("i", $entity_id);
 $stmt->execute();
-$result = $stmt->get_result();
-$past_bookings = $result ? $result->fetch_all(MYSQLI_ASSOC) : [];
+$past_bookings = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+
+// If company, get team members for assigning to bookings
+$team_members = [];
+if ($entity_type === 'company') {
+    $team_sql = "SELECT id, first_name, last_name, role_id FROM team_members WHERE company_id = ? AND is_active = 1";
+    $stmt = $conn->prepare($team_sql);
+    $stmt->bind_param("i", $company_id);
+    $stmt->execute();
+    $team_members = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+}
 
 // Get services for dropdown
 $services_sql = "
     SELECT id, name, country_id, visa_type_id 
-    FROM services 
-    WHERE admin_id = ? AND deleted_at IS NULL
+    FROM professional_visa_services 
+    WHERE entity_id = ? AND deleted_at IS NULL
     ORDER BY name
 ";
 $stmt = $conn->prepare($services_sql);
-$stmt->bind_param("i", $user_id);
+$stmt->bind_param("i", $entity_id);
 $stmt->execute();
 $services = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
@@ -350,7 +327,7 @@ function formatTime($timeStr) {
         <button id="override-date-btn" class="btn-secondary">
             <i class="fas fa-calendar-alt"></i> Set Day Off
         </button>
-        <?php if ($user_type === 'admin'): ?>
+        <?php if ($entity_type === 'company'): ?>
         <button id="update-capacity-btn" class="btn-secondary">
             <i class="fas fa-users"></i> Set Booking Capacity
         </button>
@@ -390,12 +367,12 @@ function formatTime($timeStr) {
                 <i class="fas fa-clock"></i>
             </div>
             <div class="info-content">
-                <h3>Team Timeslots</h3>
+                <h3>Available Timeslots</h3>
                 <p><?php echo count($timeslots); ?></p>
             </div>
         </div>
         
-        <?php if ($user_type === 'admin'): ?>
+        <?php if ($entity_type === 'company'): ?>
         <div class="info-card">
             <div class="info-icon">
                 <i class="fas fa-users"></i>
@@ -409,11 +386,11 @@ function formatTime($timeStr) {
         
         <div class="info-card">
             <div class="info-icon booking-type-icon">
-                <i class="fas <?php echo $user_type === 'member' ? 'fa-user' : 'fa-user-tie'; ?>"></i>
+                <i class="fas <?php echo $entity_type === 'individual' ? 'fa-user' : 'fa-building'; ?>"></i>
             </div>
             <div class="info-content">
                 <h3>Account Type</h3>
-                <p><?php echo ucfirst($user_type); ?></p>
+                <p><?php echo ucfirst($entity_type); ?> Professional</p>
             </div>
         </div>
     </div>
@@ -422,7 +399,7 @@ function formatTime($timeStr) {
     <div class="tabs-container">
         <div class="tabs-header">
             <button class="tab-btn active" data-tab="upcoming">Upcoming Bookings</button>
-            <button class="tab-btn" data-tab="schedule">Team Availability</button>
+            <button class="tab-btn" data-tab="schedule">Schedule Settings</button>
             <button class="tab-btn" data-tab="history">Booking History</button>
         </div>
         
@@ -433,7 +410,7 @@ function formatTime($timeStr) {
                         <i class="fas fa-calendar"></i>
                     </div>
                     <h3>No Upcoming Bookings</h3>
-                    <p>There are no upcoming appointments scheduled.</p>
+                    <p>You don't have any upcoming appointments scheduled.</p>
                 </div>
             <?php else: ?>
                 <div class="booking-list">
@@ -459,23 +436,19 @@ function formatTime($timeStr) {
                                 </div>
                             </div>
                             <div class="booking-details">
-                                <h4><?php echo htmlspecialchars($booking['visa_type_name']); ?> - <?php echo htmlspecialchars($booking['service_type_name']); ?></h4>
+                                <h4><?php echo htmlspecialchars($booking['service_name']); ?></h4>
                                 <div class="booking-meta">
                                     <div class="meta-item">
                                         <i class="fas fa-user"></i>
                                         <span><?php echo htmlspecialchars($booking['user_email']); ?></span>
                                     </div>
                                     <div class="meta-item">
-                                        <i class="fas fa-globe"></i>
-                                        <span><?php echo htmlspecialchars($booking['country_name']); ?></span>
-                                    </div>
-                                    <div class="meta-item">
                                         <i class="fas fa-comment"></i>
-                                        <span><?php echo htmlspecialchars($booking['consultation_mode_name']); ?></span>
+                                        <span><?php echo htmlspecialchars($booking['consultation_mode']); ?></span>
                                     </div>
                                     <div class="meta-item">
                                         <i class="fas fa-tag"></i>
-                                        <span>Ref: <?php echo htmlspecialchars($booking['reference_number'] ?? 'N/A'); ?></span>
+                                        <span>Ref: <?php echo htmlspecialchars($booking['reference_number']); ?></span>
                                     </div>
                                 </div>
                             </div>
@@ -508,23 +481,14 @@ function formatTime($timeStr) {
             <div class="schedule-settings">
                 <div class="schedule-card">
                     <div class="schedule-card-header">
-                        <h3>Team Member Availability</h3>
-                        <p>Manage your team's weekly availability slots.</p>
+                        <h3>Regular Timeslots</h3>
+                        <p>These are your regular weekly availability slots.</p>
                     </div>
                     <div class="schedule-card-body">
-                        <div class="actions-bar">
-                            <button id="add-timeslot-btn" class="btn-primary">
-                                <i class="fas fa-plus"></i> Add Team Timeslot
-                            </button>
-                            <button id="override-date-btn" class="btn-secondary">
-                                <i class="fas fa-calendar-alt"></i> Set Team Day Off
-                            </button>
-                        </div>
-                        
                         <div class="weekly-schedule">
                             <?php if (empty($timeslots)): ?>
                                 <div class="empty-schedule">
-                                    <p>No team timeslots configured yet. Click "Add Team Timeslot" to set up your team's availability.</p>
+                                    <p>No timeslots configured yet. Click "Add Timeslot" to set up your availability.</p>
                                 </div>
                             <?php else: ?>
                                 <?php
@@ -542,17 +506,19 @@ function formatTime($timeStr) {
                                         <?php else: ?>
                                             <div class="timeslot-list">
                                                 <?php foreach ($day_slots as $slot): ?>
-                                                    <div class="timeslot-item <?php echo $slot['is_active'] ? 'available' : 'unavailable'; ?>">
+                                                    <div class="timeslot-item <?php echo $slot['is_available'] ? 'available' : 'unavailable'; ?>">
                                                         <div class="timeslot-time">
                                                             <?php echo formatTime($slot['start_time']); ?> - <?php echo formatTime($slot['end_time']); ?>
                                                         </div>
                                                         <div class="timeslot-details">
-                                                            <div class="timeslot-member">
-                                                                <i class="fas fa-user"></i> <?php echo htmlspecialchars($slot['team_member_name']); ?>
-                                                            </div>
                                                             <div class="timeslot-duration">
                                                                 <i class="fas fa-clock"></i> <?php echo $slot['slot_duration']; ?> min slots
                                                             </div>
+                                                            <?php if ($slot['buffer_time'] > 0): ?>
+                                                            <div class="timeslot-buffer">
+                                                                <i class="fas fa-pause"></i> <?php echo $slot['buffer_time']; ?> min buffer
+                                                            </div>
+                                                            <?php endif; ?>
                                                         </div>
                                                         <div class="timeslot-actions">
                                                             <button class="btn-edit edit-timeslot-btn" data-id="<?php echo $slot['id']; ?>">
@@ -575,16 +541,68 @@ function formatTime($timeStr) {
                 
                 <div class="schedule-card">
                     <div class="schedule-card-header">
-                        <h3>Team Availability Overrides</h3>
-                        <p>Manage custom availability for your team on specific dates.</p>
+                        <h3>Date Overrides</h3>
+                        <p>Custom availability settings for specific dates.</p>
                     </div>
                     <div class="schedule-card-body">
-                        <div id="overrides-container">
-                            <!-- Overrides will be loaded by AJAX -->
-                            <div class="loading">Loading team availability overrides...</div>
+                        <?php if (empty($date_overrides)): ?>
+                            <div class="empty-overrides">
+                                <p>No date overrides configured. Click "Set Day Off" to mark specific dates as unavailable.</p>
+                            </div>
+                        <?php else: ?>
+                            <div class="override-list">
+                                <?php foreach ($date_overrides as $override): 
+                                    $override_date = new DateTime($override['date']);
+                                ?>
+                                    <div class="override-item <?php echo $override['is_available'] ? 'available' : 'unavailable'; ?>">
+                                        <div class="override-date">
+                                            <?php echo $override_date->format('l, F j, Y'); ?>
+                                        </div>
+                                        <div class="override-status">
+                                            <?php echo $override['is_available'] ? 'Available' : 'Unavailable'; ?>
+                                        </div>
+                                        <?php if (!empty($override['reason'])): ?>
+                                        <div class="override-reason">
+                                            <i class="fas fa-comment"></i> <?php echo htmlspecialchars($override['reason']); ?>
+                                        </div>
+                                        <?php endif; ?>
+                                        <div class="override-actions">
+                                            <button class="btn-edit edit-override-btn" data-id="<?php echo $override['id']; ?>">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button class="btn-delete delete-override-btn" data-id="<?php echo $override['id']; ?>">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                
+                <?php if ($entity_type === 'company'): ?>
+                <div class="schedule-card">
+                    <div class="schedule-card-header">
+                        <h3>Company Booking Capacity</h3>
+                        <p>Maximum number of concurrent bookings your company can handle.</p>
+                    </div>
+                    <div class="schedule-card-body">
+                        <div class="capacity-info">
+                            <div class="capacity-value">
+                                <span><?php echo $max_concurrent_bookings; ?></span>
+                                <p>concurrent bookings</p>
+                            </div>
+                            <div class="capacity-description">
+                                <p>This is the maximum number of bookings that can be made for the same timeslot. For individual professionals, this is always 1.</p>
+                            </div>
+                            <button id="capacity-edit-btn" class="btn-secondary">
+                                <i class="fas fa-edit"></i> Change Capacity
+                            </button>
                         </div>
                     </div>
                 </div>
+                <?php endif; ?>
             </div>
         </div>
         
@@ -595,7 +613,7 @@ function formatTime($timeStr) {
                         <i class="fas fa-history"></i>
                     </div>
                     <h3>No Past Bookings</h3>
-                    <p>Booking history will appear here once appointments are completed.</p>
+                    <p>Your booking history will appear here once you have completed appointments.</p>
                 </div>
             <?php else: ?>
                 <div class="booking-history">
@@ -604,8 +622,6 @@ function formatTime($timeStr) {
                             <tr>
                                 <th>Date & Time</th>
                                 <th>Client</th>
-                                <th>Country</th>
-                                <th>Visa Type</th>
                                 <th>Service</th>
                                 <th>Mode</th>
                                 <th>Status</th>
@@ -624,10 +640,8 @@ function formatTime($timeStr) {
                                         </div>
                                     </td>
                                     <td><?php echo htmlspecialchars($booking['user_email']); ?></td>
-                                    <td><?php echo htmlspecialchars($booking['country_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($booking['visa_type_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($booking['service_type_name']); ?></td>
-                                    <td><?php echo htmlspecialchars($booking['consultation_mode_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($booking['service_name']); ?></td>
+                                    <td><?php echo htmlspecialchars($booking['consultation_mode']); ?></td>
                                     <td>
                                         <span class="status-badge <?php echo strtolower($booking['status']); ?>">
                                             <?php echo ucfirst($booking['status']); ?>
@@ -648,11 +662,11 @@ function formatTime($timeStr) {
     </div>
 </div>
 
-<!-- Add Timeslot Modal -->
+<!-- Add/Edit Timeslot Modal -->
 <div class="modal" id="timeslot-modal">
     <div class="modal-content">
         <div class="modal-header">
-            <h2 id="timeslot-modal-title">Add Team Member Timeslot</h2>
+            <h2 id="timeslot-modal-title">Add Timeslot</h2>
             <button class="modal-close"><i class="fas fa-times"></i></button>
         </div>
         <div class="modal-body">
@@ -661,16 +675,8 @@ function formatTime($timeStr) {
                 <input type="hidden" name="timeslot_id" id="timeslot-id" value="">
                 
                 <div class="form-group">
-                    <label for="team-member">Team Member</label>
-                    <select id="team-member" name="team_member_id" required>
-                        <option value="">Select Team Member</option>
-                        <!-- Team members will be loaded by AJAX -->
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="day-of-week">Day of Week</label>
-                    <select id="day-of-week" name="day_of_week" required>
+                    <label for="day_of_week">Day of Week</label>
+                    <select id="day_of_week" name="day_of_week" required>
                         <option value="0">Sunday</option>
                         <option value="1">Monday</option>
                         <option value="2">Tuesday</option>
@@ -683,28 +689,31 @@ function formatTime($timeStr) {
                 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="start-time">Start Time</label>
-                        <input type="time" id="start-time" name="start_time" required>
+                        <label for="start_time">Start Time</label>
+                        <input type="time" id="start_time" name="start_time" required>
                     </div>
                     <div class="form-group">
-                        <label for="end-time">End Time</label>
-                        <input type="time" id="end-time" name="end_time" required>
+                        <label for="end_time">End Time</label>
+                        <input type="time" id="end_time" name="end_time" required>
                     </div>
                 </div>
                 
-                <div class="form-group">
-                    <label for="slot-duration">Slot Duration (minutes)</label>
-                    <input type="number" id="slot-duration" name="slot_duration" min="15" max="240" value="60" required>
-                    <small>Length of each appointment slot</small>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="slot_duration">Slot Duration (minutes)</label>
+                        <input type="number" id="slot_duration" name="slot_duration" min="15" max="240" value="60" required>
+                        <small class="form-text">Length of each appointment slot</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="buffer_time">Buffer Time (minutes)</label>
+                        <input type="number" id="buffer_time" name="buffer_time" min="0" max="60" value="0">
+                        <small class="form-text">Break time between appointments</small>
+                    </div>
                 </div>
                 
-                <div class="form-group">
-                    <label for="slot-active">Status</label>
-                    <div class="toggle-switch">
-                        <input type="checkbox" id="slot-active" name="is_active" checked>
-                        <label for="slot-active"></label>
-                    </div>
-                    <small>Active timeslots will be available for booking</small>
+                <div class="form-checkbox">
+                    <input type="checkbox" id="is_available" name="is_available" checked>
+                    <label for="is_available">This timeslot is available for bookings</label>
                 </div>
                 
                 <div class="form-actions">
@@ -715,6 +724,81 @@ function formatTime($timeStr) {
         </div>
     </div>
 </div>
+
+<!-- Date Override Modal -->
+<div class="modal" id="override-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="override-modal-title">Set Date Availability</h2>
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="override-form" method="POST" action="">
+                <input type="hidden" name="action" value="add_date_override">
+                <input type="hidden" name="override_id" id="override-id" value="">
+                
+                <div class="form-group">
+                    <label for="override_date">Date</label>
+                    <input type="date" id="override_date" name="override_date" required>
+                </div>
+                
+                <div class="form-radio-group">
+                    <div class="form-radio">
+                        <input type="radio" id="date_unavailable" name="is_date_available" value="0" checked>
+                        <label for="date_unavailable">Mark as Unavailable (Day Off)</label>
+                    </div>
+                    <div class="form-radio">
+                        <input type="radio" id="date_available" name="is_date_available" value="1">
+                        <label for="date_available">Mark as Available</label>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="reason">Reason (Optional)</label>
+                    <textarea id="reason" name="reason" rows="2"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
+                    <button type="submit" class="btn-primary" id="save-override-btn">Save Override</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Booking Capacity Modal -->
+<?php if ($entity_type === 'company'): ?>
+<div class="modal" id="capacity-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>Set Booking Capacity</h2>
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="capacity-form" method="POST" action="">
+                <input type="hidden" name="action" value="update_capacity">
+                
+                <div class="form-group">
+                    <label for="max_concurrent_bookings">Maximum Concurrent Bookings</label>
+                    <input type="number" id="max_concurrent_bookings" name="max_concurrent_bookings" min="1" max="20" value="<?php echo $max_concurrent_bookings; ?>" required>
+                    <small class="form-text">Maximum number of bookings that can be made for the same timeslot</small>
+                </div>
+                
+                <div class="capacity-explanation">
+                    <p><strong>What does this mean?</strong></p>
+                    <p>If set to 3, your company can accept up to 3 bookings for the same time period. This is useful for companies with multiple team members who can handle concurrent appointments.</p>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
+                    <button type="submit" class="btn-primary">Save Capacity</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- View Booking Modal -->
 <div class="modal" id="view-booking-modal">
@@ -730,6 +814,35 @@ function formatTime($timeStr) {
                     <i class="fas fa-spinner fa-spin"></i> Loading booking details...
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- Update Booking Status Modal -->
+<div class="modal" id="update-status-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="status-modal-title">Update Booking Status</h2>
+            <button class="modal-close"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <form id="update-status-form" method="POST" action="">
+                <input type="hidden" name="action" value="update_booking_status">
+                <input type="hidden" name="booking_id" id="status-booking-id" value="">
+                <input type="hidden" name="status" id="booking-status" value="">
+                
+                <div class="status-message" id="status-message"></div>
+                
+                <div class="form-group">
+                    <label for="notes">Notes</label>
+                    <textarea id="notes" name="notes" rows="3"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary modal-cancel">Cancel</button>
+                    <button type="submit" class="btn-primary" id="update-status-btn">Update Status</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
@@ -760,33 +873,8 @@ document.addEventListener('DOMContentLoaded', function() {
             // Activate selected tab
             this.classList.add('active');
             document.getElementById(tabId + '-tab').classList.add('active');
-            
-            // If we switched to schedule tab, load team members
-            if (tabId === 'schedule') {
-                loadTeamMembers();
-            }
         });
     });
-    
-    // Load team members for timeslot form
-    function loadTeamMembers() {
-        const teamMemberSelect = document.getElementById('team-member');
-        if (teamMemberSelect.options.length <= 1) {
-            fetch('ajax/get_team_members.php')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        data.team_members.forEach(member => {
-                            const option = document.createElement('option');
-                            option.value = member.id;
-                            option.textContent = member.name;
-                            teamMemberSelect.appendChild(option);
-                        });
-                    }
-                })
-                .catch(error => console.error('Error loading team members:', error));
-        }
-    }
     
     // Show timeslot modal
     const addTimeslotBtn = document.getElementById('add-timeslot-btn');
@@ -797,7 +885,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('timeslot-form').reset();
         document.getElementById('timeslot-form-action').value = 'add_timeslot';
         document.getElementById('timeslot-id').value = '';
-        document.getElementById('timeslot-modal-title').textContent = 'Add Team Member Timeslot';
+        document.getElementById('timeslot-modal-title').textContent = 'Add Timeslot';
         
         // Show modal
         timeslotModal.classList.add('show');
@@ -915,11 +1003,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
                 <div class="detail-item">
                     <div class="detail-label">Service</div>
-                    <div class="detail-value">${booking.visa_type_name} - ${booking.service_type_name}</div>
+                    <div class="detail-value">${booking.service_name}</div>
                 </div>
                 <div class="detail-item">
                     <div class="detail-label">Consultation Mode</div>
-                    <div class="detail-value">${booking.consultation_mode_name}</div>
+                    <div class="detail-value">${booking.consultation_mode}</div>
                 </div>
             </div>
             
@@ -929,6 +1017,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="detail-label">Email</div>
                     <div class="detail-value">${booking.user_email}</div>
                 </div>
+                ${booking.user_phone ? `
+                <div class="detail-item">
+                    <div class="detail-label">Phone</div>
+                    <div class="detail-value">${booking.user_phone}</div>
+                </div>` : ''}
             </div>
         `;
         

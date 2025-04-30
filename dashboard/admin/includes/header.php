@@ -89,6 +89,7 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
     <link rel="stylesheet" href="https://cdn.datatables.net/1.11.5/css/dataTables.bootstrap5.min.css">
     <link rel="stylesheet" href="../assets/css/style.css">
     <link rel="stylesheet" href="assets/css/visa.css">
+    <link rel="stylesheet" href="assets/css/profile.css">
     <?php if (isset($page_specific_css)): ?>
         <link rel="stylesheet" href="<?php echo $page_specific_css; ?>">
     <?php endif; ?>

@@ -64,7 +64,7 @@ if ($user_type == 'member') {
 }
 ?>
 
-<div class="content">
+
     <div class="chat-wrapper">
         <div class="chat-container">
             <!-- Sidebar -->
@@ -126,7 +126,7 @@ if ($user_type == 'member') {
             </div>
         </div>
     </div>
-</div>
+
 
 <script>
 let activeConversationId = null;
@@ -429,31 +429,28 @@ if (!document.querySelector('.conversation-item')) {
 
 <style>
 .chat-wrapper {
-    display: flex;
-    justify-content: center;
-    margin: 20px 0;
+    height: calc(100vh - 60px); 
 }
 
 .chat-container {
     display: flex;
-    width: 100%;
-    height: 70vh;
+    background: white;
     border-radius: 10px;
-    overflow: hidden;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    height: 100%;
     position: relative;
+    transition: all 0.3s ease;
 }
 
 .chat-sidebar {
     width: 280px;
-    background-color: #f5f7fa;
-    border-right: 1px solid #e6e9ed;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    transition: width 0.3s;
+    border-right: 1px solid #e0e0e0;
+    transition: all 0.3s ease;
+    background: white;
 }
-
+.chat-container.sidebar-hidden .chat-sidebar {
+    margin-left: -280px;
+}
 .sidebar-content {
     padding: 15px;
     height: 100%;
@@ -462,21 +459,24 @@ if (!document.querySelector('.conversation-item')) {
 }
 
 .new-chat-btn {
-    padding: 10px 15px;
-    background-color: #3498db;
+    width: 100%;
+    padding: 12px;
+    background:  #042167;
     color: white;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     cursor: pointer;
+    font-size: 1rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    margin-bottom: 15px;
+    gap: 8px;
+    margin-bottom: 20px;
     transition: background-color 0.2s;
 }
 
 .new-chat-btn:hover {
-    background-color: #2980b9;
+    background: #0056b3;
 }
 
 .new-chat-btn i {

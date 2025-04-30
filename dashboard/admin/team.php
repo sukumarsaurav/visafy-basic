@@ -1,10 +1,13 @@
 <?php
+// Start output buffering to prevent 'headers already sent' errors
+ob_start();
+
 $page_title = "Team Management";
 $page_specific_css = "assets/css/team.css";
 require_once 'includes/header.php';
 
 // Get all team members
-$query = "SELECT tm.id, tm.role, tm.custom_role_name, tm.permissions, tm.created_at,
+$query = "SELECT tm.id, tm.role, tm.custom_role_name, tm.permissions, tm.created_at, tm.phone,
           u.id as user_id, u.first_name, u.last_name, u.email, u.status, u.profile_picture, u.email_verified
           FROM team_members tm
           JOIN users u ON tm.user_id = u.id
@@ -29,6 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invite_member'])) {
     $first_name = trim($_POST['first_name']);
     $last_name = trim($_POST['last_name']);
     $email = trim($_POST['email']);
+    $phone = isset($_POST['phone']) ? trim($_POST['phone']) : '';
     $role = $_POST['role'];
     $custom_role_name = isset($_POST['custom_role_name']) ? trim($_POST['custom_role_name']) : null;
     
@@ -79,9 +83,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invite_member'])) {
             $user_id = $conn->insert_id;
             
             // Create team member record
-            $member_insert = "INSERT INTO team_members (user_id, role, custom_role_name) VALUES (?, ?, ?)";
+            $member_insert = "INSERT INTO team_members (user_id, phone, role, custom_role_name) VALUES (?, ?, ?, ?)";
             $stmt = $conn->prepare($member_insert);
-            $stmt->bind_param('iss', $user_id, $role, $custom_role_name);
+            $stmt->bind_param('isss', $user_id, $phone, $role, $custom_role_name);
             $stmt->execute();
             
             // Send invitation email
@@ -249,8 +253,17 @@ if (isset($_GET['success'])) {
 ?>
 
 <div class="content">
-    <h1>Team Management</h1>
-    <p>Manage your team members and send invitations to new team members.</p>
+    <div class="header-container">
+        <div>
+            <h1>Team Management</h1>
+            <p>Manage your team members and send invitations to new team members.</p>
+        </div>
+        <div>
+            <button type="button" class="btn primary-btn" id="addTeamMemberBtn">
+                <i class="fas fa-plus"></i> Add Team Member
+            </button>
+        </div>
+    </div>
     
     <?php if (isset($error_message)): ?>
         <div class="alert alert-danger"><?php echo $error_message; ?></div>
@@ -259,51 +272,6 @@ if (isset($_GET['success'])) {
     <?php if (isset($success_message)): ?>
         <div class="alert alert-success"><?php echo $success_message; ?></div>
     <?php endif; ?>
-    
-    <!-- Invite New Team Member Section -->
-    <div class="section">
-        <h2>Invite New Team Member</h2>
-        <div class="invite-card">
-            <form action="team.php" method="POST" class="invite-form">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="first_name">First Name*</label>
-                        <input type="text" name="first_name" id="first_name" class="form-control" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="last_name">Last Name*</label>
-                        <input type="text" name="last_name" id="last_name" class="form-control" required>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="email">Email Address*</label>
-                    <input type="email" name="email" id="email" class="form-control" required>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="role">Role*</label>
-                        <select name="role" id="role" class="form-control" required>
-                            <option value="Case Manager">Case Manager</option>
-                            <option value="Document Creator">Document Creator</option>
-                            <option value="Career Consultant">Career Consultant</option>
-                            <option value="Business Plan Creator">Business Plan Creator</option>
-                            <option value="Immigration Assistant">Immigration Assistant</option>
-                            <option value="Social Media Manager">Social Media Manager</option>
-                            <option value="Leads & CRM Manager">Leads & CRM Manager</option>
-                            <option value="Custom">Custom Role</option>
-                        </select>
-                    </div>
-                    <div class="form-group" id="custom_role_group" style="display: none;">
-                        <label for="custom_role_name">Custom Role Name*</label>
-                        <input type="text" name="custom_role_name" id="custom_role_name" class="form-control">
-                    </div>
-                </div>
-                <div class="form-buttons">
-                    <button type="submit" name="invite_member" class="btn submit-btn">Send Invitation</button>
-                </div>
-            </form>
-        </div>
-    </div>
     
     <!-- Team Members Section -->
     <div class="section">
@@ -339,6 +307,9 @@ if (isset($_GET['success'])) {
                                 <?php echo $member['role'] === 'Custom' ? htmlspecialchars($member['custom_role_name']) : htmlspecialchars($member['role']); ?>
                             </p>
                             <p class="member-email"><?php echo htmlspecialchars($member['email']); ?></p>
+                            <?php if (!empty($member['phone'])): ?>
+                                <p class="member-phone"><i class="fas fa-phone"></i> <?php echo htmlspecialchars($member['phone']); ?></p>
+                            <?php endif; ?>
                             
                             <?php if (!$member['email_verified']): ?>
                                 <p class="member-pending">Pending activation</p>
@@ -384,11 +355,73 @@ if (isset($_GET['success'])) {
     </div>
 </div>
 
+<!-- Add Team Member Modal -->
+<div class="modal" id="addTeamMemberModal">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Add Team Member</h3>
+                <button type="button" class="close" data-dismiss="modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form action="team.php" method="POST" id="addTeamMemberForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="modal_first_name">First Name*</label>
+                            <input type="text" name="first_name" id="modal_first_name" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="modal_last_name">Last Name*</label>
+                            <input type="text" name="last_name" id="modal_last_name" class="form-control" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="modal_email">Email Address*</label>
+                        <input type="email" name="email" id="modal_email" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="modal_phone">Phone Number</label>
+                        <input type="tel" name="phone" id="modal_phone" class="form-control">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="modal_role">Role*</label>
+                            <select name="role" id="modal_role" class="form-control" required>
+                                <option value="Case Manager">Case Manager</option>
+                                <option value="Document Creator">Document Creator</option>
+                                <option value="Career Consultant">Career Consultant</option>
+                                <option value="Business Plan Creator">Business Plan Creator</option>
+                                <option value="Immigration Assistant">Immigration Assistant</option>
+                                <option value="Social Media Manager">Social Media Manager</option>
+                                <option value="Leads & CRM Manager">Leads & CRM Manager</option>
+                                <option value="Custom">Custom Role</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="modal_custom_role_group" style="display: none;">
+                            <label for="modal_custom_role_name">Custom Role Name*</label>
+                            <input type="text" name="custom_role_name" id="modal_custom_role_name" class="form-control">
+                        </div>
+                    </div>
+                    <div class="form-buttons">
+                        <button type="button" class="btn cancel-btn" data-dismiss="modal">Cancel</button>
+                        <button type="submit" name="invite_member" class="btn submit-btn">Send Invitation</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+
+</style>
+
 <script>
-// Show/hide custom role name field based on role selection
-document.getElementById('role').addEventListener('change', function() {
-    const customRoleGroup = document.getElementById('custom_role_group');
-    const customRoleInput = document.getElementById('custom_role_name');
+
+// Modal functionality
+document.getElementById('modal_role').addEventListener('change', function() {
+    const customRoleGroup = document.getElementById('modal_custom_role_group');
+    const customRoleInput = document.getElementById('modal_custom_role_name');
     
     if (this.value === 'Custom') {
         customRoleGroup.style.display = 'block';
@@ -398,6 +431,31 @@ document.getElementById('role').addEventListener('change', function() {
         customRoleInput.removeAttribute('required');
     }
 });
+
+// Open modal when Add Team Member button is clicked
+document.getElementById('addTeamMemberBtn').addEventListener('click', function() {
+    document.getElementById('addTeamMemberModal').style.display = 'block';
+});
+
+// Close modal when close button is clicked
+document.querySelectorAll('[data-dismiss="modal"]').forEach(function(element) {
+    element.addEventListener('click', function() {
+        document.getElementById('addTeamMemberModal').style.display = 'none';
+    });
+});
+
+// Close modal when clicking outside of it
+window.addEventListener('click', function(event) {
+    const modal = document.getElementById('addTeamMemberModal');
+    if (event.target === modal) {
+        modal.style.display = 'none';
+    }
+});
 </script>
 
-<?php require_once 'includes/footer.php'; ?> 
+<?php
+// End output buffering and send content to browser
+ob_end_flush();
+?>
+
+<?php require_once 'includes/footer.php'; ?>
